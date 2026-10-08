@@ -3,6 +3,11 @@ const pool = require('../config/db');
 // 0 = droit d'adhesion (paiement unique a l'entree dans l'association) ; 1-12 = cotisation mensuelle
 const MOIS_ADHESION = 0;
 
+// Jeko facture 1,5% de commission sur chaque paiement en ligne. Pour que l'AEA recoive malgre tout
+// le montant du complet (et une petite marge), ce surcout fixe est ajoute au montant demande au payeur,
+// plutot que d'etre retranche de ce que touche l'association.
+const FRAIS_PLATEFORME_FCFA = 100;
+
 function statutDe(montantDu, montantPaye) {
   if (montantDu <= 0) return 'non_du';
   if (montantPaye <= 0) return 'non_paye';
@@ -47,4 +52,4 @@ async function assurerLigneCotisation(membreId, annee, mois) {
   return { id: result.insertId, membre_id: membreId, annee, mois, montant_du: montantDu, montant_paye: 0 };
 }
 
-module.exports = { MOIS_ADHESION, ROLES_BUREAU, statutDe, montantDuPour, assurerLigneCotisation };
+module.exports = { MOIS_ADHESION, ROLES_BUREAU, FRAIS_PLATEFORME_FCFA, statutDe, montantDuPour, assurerLigneCotisation };

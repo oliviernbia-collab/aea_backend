@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { broadcast } = require('./notify');
 
 async function logAudit({ tableName, recordId, userId, action, ancienneValeur = null, nouvelleValeur = null }) {
   await pool.query(
@@ -13,6 +14,7 @@ async function logAudit({ tableName, recordId, userId, action, ancienneValeur = 
       nouvelleValeur ? JSON.stringify(nouvelleValeur) : null,
     ]
   );
+  broadcast('journal:update');
 }
 
 module.exports = { logAudit };

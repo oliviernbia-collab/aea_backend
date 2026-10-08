@@ -79,6 +79,12 @@ CREATE TABLE cotisations_config (
   montant_membre DECIMAL(10,2) NOT NULL,
   montant_bureau DECIMAL(10,2) NOT NULL DEFAULT 1000,
   montant_adhesion DECIMAL(10,2) NOT NULL DEFAULT 1000,
+  -- Numeros Mobile Money de l'association, affiches au membre pour qu'il sache ou envoyer son paiement
+  -- avant de le declarer (pas d'API de paiement en ligne : flux declaratif + preuve, valide par le tresorier).
+  numero_wave VARCHAR(30) NULL,
+  numero_mtn_momo VARCHAR(30) NULL,
+  numero_orange_money VARCHAR(30) NULL,
+  numero_moov_money VARCHAR(30) NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
@@ -187,3 +193,39 @@ CREATE INDEX idx_cotisations_membre ON cotisations(membre_id);
 CREATE INDEX idx_caisse_date ON caisse_operations(date_operation);
 CREATE INDEX idx_messages_dest ON messages(destinataire_id);
 CREATE INDEX idx_notifications_user ON notifications(user_id, lu);
+
+-- ============================================================
+-- 5.4 Paiements en ligne (agregateur Jeko) -- debit direct du compte Mobile Money du membre
+-- ============================================================
+CREATE TABLE paiements_en_ligne (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  membre_id INT NOT NULL,
+  reference VARCHAR(100) NOT NULL UNIQUE,
+  jeko_payment_request_id VARCHAR(100) NULL,
+  payment_method ENUM('wave','orange','mtn','moov') NOT NULL,
+  montant DECIMAL(10,2) NOT NULL,
+  -- montant_charge = montant + frais de transaction (voir utils/cotisations.js FRAIS_PLATEFORME_FCFA) :
+  -- ce que le payeur debourse reellement, pour que l'AEA recoive le du complet malgre la commission Jeko (1,5%).
+  montant_charge DECIMAL(10,2) NOT NULL DEFAULT 0,
+  mois_couverts JSON NOT NULL,
+  statut ENUM('pending','success','error') NOT NULL DEFAULT 'pending',
+  redirect_url VARCHAR(500) NULL,
+  error_reason VARCHAR(255) NULL,
+  paiement_id INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (membre_id) REFERENCES users(id),
+  FOREIGN KEY (paiement_id) REFERENCES paiements(id)
+) ENGINE=InnoDB;
+
+-- ============================================================
+-- 6. Gestion des permissions (droits par role, modifiables par le bureau)
+-- ============================================================
+CREATE TABLE role_permissions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  role VARCHAR(50) NOT NULL,
+  permission_key VARCHAR(100) NOT NULL,
+  autorise BOOLEAN NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_role_permission (role, permission_key)
+) ENGINE=InnoDB;

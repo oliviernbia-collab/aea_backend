@@ -1,39 +1,15 @@
 const express = require('express');
 const pool = require('../config/db');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 const { makeUploader } = require('../middleware/upload');
 const { notifyUser, broadcast } = require('../utils/notify');
-const { logAudit } = require('../utils/audit');
-const { MOIS_ADHESION, ROLES_BUREAU, statutDe, assurerLigneCotisation } = require('../utils/cotisations');
+const { MOIS_ADHESION, ROLES_BUREAU, FRAIS_PLATEFORME_FCFA, assurerLigneCotisation } = require('../utils/cotisations');
+const { enregistrerEntreeCaisse, libellePaiement, appliquerPaiementAuxCotisations, finaliserPaiementEnLigne } = require('../services/cotisationsPaiements');
+const jeko = require('../services/jeko');
 
 const router = express.Router();
 const uploadPreuve = makeUploader('preuves');
-
-// Fait entrer un paiement de cotisation valide dans la caisse de l'association (transparence financiere, section 2 du CDC)
-async function enregistrerEntreeCaisse({ membreId, montant, dateOperation, saisiPar, libelle }) {
-  const [result] = await pool.query(
-    `INSERT INTO caisse_operations (type, fonds, categorie, libelle, montant, date_operation, saisi_par, statut)
-     VALUES ('entree', 'fonctionnement', 'Cotisation', ?, ?, ?, ?, 'validee')`,
-    [libelle, montant, dateOperation, saisiPar]
-  );
-  await logAudit({
-    tableName: 'caisse_operations',
-    recordId: result.insertId,
-    userId: saisiPar,
-    action: 'creation',
-    nouvelleValeur: { type: 'entree', categorie: 'Cotisation', montant, membreId },
-  });
-  return result.insertId;
-}
-
-function libellePaiement(membre, moisCouverts, suffixe) {
-  const inclutAdhesion = moisCouverts.some((m) => m.mois === MOIS_ADHESION);
-  const inclutMensuel = moisCouverts.some((m) => m.mois !== MOIS_ADHESION);
-  let nature = 'Cotisation';
-  if (inclutAdhesion && inclutMensuel) nature = "Droit d'adhesion + cotisation";
-  else if (inclutAdhesion) nature = "Droit d'adhesion";
-  return `${nature} - ${membre.prenom} ${membre.nom} (${suffixe})`;
-}
 
 // GET /api/cotisations/config
 router.get('/config', authenticate, async (req, res) => {
@@ -43,31 +19,46 @@ router.get('/config', authenticate, async (req, res) => {
 });
 
 // POST /api/cotisations/config -- COT-01 (bareme differencie membre / bureau + droit d'adhesion)
-router.post('/config', authenticate, authorize('tresorier', 'super_admin'), async (req, res) => {
-  const { annee, montant_membre, montant_bureau, montant_adhesion } = req.body;
+router.post('/config', authenticate, requirePermission('cotisations.configurer'), async (req, res) => {
+  const {
+    annee, montant_membre, montant_bureau, montant_adhesion,
+    numero_wave, numero_mtn_momo, numero_orange_money, numero_moov_money,
+  } = req.body;
   await pool.query(
-    `INSERT INTO cotisations_config (annee, montant_membre, montant_bureau, montant_adhesion) VALUES (?, ?, ?, ?)
+    `INSERT INTO cotisations_config
+       (annee, montant_membre, montant_bureau, montant_adhesion, numero_wave, numero_mtn_momo, numero_orange_money, numero_moov_money)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE montant_membre = VALUES(montant_membre), montant_bureau = VALUES(montant_bureau),
-       montant_adhesion = VALUES(montant_adhesion)`,
-    [annee, montant_membre, montant_bureau, montant_adhesion]
+       montant_adhesion = VALUES(montant_adhesion), numero_wave = VALUES(numero_wave),
+       numero_mtn_momo = VALUES(numero_mtn_momo), numero_orange_money = VALUES(numero_orange_money),
+       numero_moov_money = VALUES(numero_moov_money)`,
+    [annee, montant_membre, montant_bureau, montant_adhesion, numero_wave || null, numero_mtn_momo || null, numero_orange_money || null, numero_moov_money || null]
   );
 
   // Initialise les 12 lignes de cotisation (bareme selon le role) + la ligne de droit d'adhesion
-  // pour chaque membre actif qui n'en a pas encore pour cette annee.
+  // pour chaque membre actif qui n'en a pas encore pour cette annee, ET met a jour le montant du
+  // des lignes pas encore payees (montant_paye = 0) pour que le nouveau bareme s'applique tout de
+  // suite. Une ligne deja (partiellement) payee n'est jamais modifiee retroactivement.
   const [membres] = await pool.query(`SELECT id, role FROM users WHERE statut = 'actif'`);
   for (const m of membres) {
     const montantMensuel = ROLES_BUREAU.includes(m.role) ? montant_bureau : montant_membre;
     for (let mois = 1; mois <= 12; mois += 1) {
       await pool.query(
-        `INSERT IGNORE INTO cotisations (membre_id, annee, mois, montant_du, montant_paye, statut)
-         VALUES (?, ?, ?, ?, 0, 'non_paye')`,
-        [m.id, annee, mois, montantMensuel]
+        `INSERT INTO cotisations (membre_id, annee, mois, montant_du, montant_paye, statut)
+         VALUES (?, ?, ?, ?, 0, ?)
+         ON DUPLICATE KEY UPDATE
+           montant_du = IF(montant_paye = 0, VALUES(montant_du), montant_du),
+           statut = IF(montant_paye = 0, VALUES(statut), statut)`,
+        [m.id, annee, mois, montantMensuel, montantMensuel > 0 ? 'non_paye' : 'non_du']
       );
     }
     await pool.query(
-      `INSERT IGNORE INTO cotisations (membre_id, annee, mois, montant_du, montant_paye, statut)
-       VALUES (?, ?, ?, ?, 0, 'non_paye')`,
-      [m.id, annee, MOIS_ADHESION, montant_adhesion]
+      `INSERT INTO cotisations (membre_id, annee, mois, montant_du, montant_paye, statut)
+       VALUES (?, ?, ?, ?, 0, ?)
+       ON DUPLICATE KEY UPDATE
+         montant_du = IF(montant_paye = 0, VALUES(montant_du), montant_du),
+         statut = IF(montant_paye = 0, VALUES(statut), statut)`,
+      [m.id, annee, MOIS_ADHESION, montant_adhesion, montant_adhesion > 0 ? 'non_paye' : 'non_du']
     );
   }
 
@@ -127,7 +118,7 @@ router.get('/tableau', authenticate, async (req, res) => {
 });
 
 // GET /api/cotisations/adhesions -- vue bureau des droits d'adhesion (paye / non paye)
-router.get('/adhesions', authenticate, authorize('tresorier', 'president', 'secretaire_general', 'super_admin'), async (req, res) => {
+router.get('/adhesions', authenticate, requirePermission('cotisations.voir_adhesions'), async (req, res) => {
   const annee = req.query.annee || new Date().getFullYear();
   const [rows] = await pool.query(
     `SELECT u.id AS membre_id, u.nom, u.prenom, u.numero_membre, u.role,
@@ -179,7 +170,7 @@ router.get('/ma-fiche', authenticate, async (req, res) => {
 });
 
 // POST /api/cotisations/paiements -- COT-05, COT-06 (saisie tresorier, recu auto ; couvre cotisations et/ou droit d'adhesion)
-router.post('/paiements', authenticate, authorize('tresorier', 'super_admin'), async (req, res) => {
+router.post('/paiements', authenticate, requirePermission('cotisations.saisir_paiement'), async (req, res) => {
   const { membre_id, montant, date_paiement, mode_paiement, mois_couverts } = req.body;
   if (!Array.isArray(mois_couverts) || !mois_couverts.length) {
     return res.status(400).json({ message: 'Precisez au moins un mois couvert (ou le droit d\'adhesion).' });
@@ -201,19 +192,7 @@ router.post('/paiements', authenticate, authorize('tresorier', 'super_admin'), a
     libelle: libellePaiement(membre, mois_couverts, recuNumero),
   });
 
-  let reste = Number(montant);
-  for (const { annee, mois } of mois_couverts) {
-    const c = await assurerLigneCotisation(membre_id, annee, mois);
-    const aPayer = Math.max(0, Number(c.montant_du) - Number(c.montant_paye));
-    const affecte = Math.min(reste, aPayer);
-    const nouveauPaye = Number(c.montant_paye) + affecte;
-    reste -= affecte;
-    await pool.query('UPDATE cotisations SET montant_paye = ?, statut = ? WHERE id = ?', [
-      nouveauPaye,
-      statutDe(Number(c.montant_du), nouveauPaye),
-      c.id,
-    ]);
-  }
+  await appliquerPaiementAuxCotisations(membre_id, mois_couverts, montant);
 
   await notifyUser(membre_id, {
     type: 'paiement_recu',
@@ -255,26 +234,14 @@ router.post('/declarations', authenticate, uploadPreuve.single('preuve'), async 
 });
 
 // PATCH /api/cotisations/declarations/:id/valider -- tresorier confirme la declaration COT-09
-router.patch('/declarations/:id/valider', authenticate, authorize('tresorier', 'super_admin'), async (req, res) => {
+router.patch('/declarations/:id/valider', authenticate, requirePermission('cotisations.valider_declaration'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM paiements WHERE id = ?', [req.params.id]);
   if (!rows.length) return res.status(404).json({ message: 'Declaration introuvable.' });
   const paiement = rows[0];
   if (paiement.statut_validation !== 'en_attente') return res.status(400).json({ message: 'Deja traitee.' });
 
   const moisCouverts = typeof paiement.mois_couverts === 'string' ? JSON.parse(paiement.mois_couverts) : paiement.mois_couverts;
-  let reste = Number(paiement.montant);
-  for (const { annee, mois } of moisCouverts) {
-    const c = await assurerLigneCotisation(paiement.membre_id, annee, mois);
-    const aPayer = Math.max(0, Number(c.montant_du) - Number(c.montant_paye));
-    const affecte = Math.min(reste, aPayer);
-    const nouveauPaye = Number(c.montant_paye) + affecte;
-    reste -= affecte;
-    await pool.query('UPDATE cotisations SET montant_paye = ?, statut = ? WHERE id = ?', [
-      nouveauPaye,
-      statutDe(Number(c.montant_du), nouveauPaye),
-      c.id,
-    ]);
-  }
+  await appliquerPaiementAuxCotisations(paiement.membre_id, moisCouverts, paiement.montant);
 
   await pool.query("UPDATE paiements SET statut_validation = 'valide' WHERE id = ?", [req.params.id]);
 
@@ -295,6 +262,101 @@ router.patch('/declarations/:id/valider', authenticate, authorize('tresorier', '
   broadcast('cotisations:update');
   broadcast('caisse:update');
   res.json({ message: 'Declaration validee et cotisations mises a jour.' });
+});
+
+// POST /api/cotisations/paiement-en-ligne -- debit direct du compte Mobile Money du membre via Jeko (API direct)
+router.post('/paiement-en-ligne', authenticate, async (req, res) => {
+  const { mode_paiement, mois_couverts, payer_phone } = req.body;
+  const methodesValides = ['wave', 'orange', 'mtn', 'moov'];
+  if (!methodesValides.includes(mode_paiement)) {
+    return res.status(400).json({ message: 'Moyen de paiement invalide.' });
+  }
+  if (!Array.isArray(mois_couverts) || !mois_couverts.length) {
+    return res.status(400).json({ message: 'Precisez au moins un mois a payer.' });
+  }
+  if (!jeko.estConfigure()) {
+    return res.status(503).json({ message: "Le paiement en ligne n'est pas encore configure. Contactez le bureau." });
+  }
+
+  const telephone = jeko.normaliserTelephoneCI(payer_phone);
+  if (!telephone) {
+    return res.status(422).json({ message: 'Numero mobile invalide. Format attendu : 07XXXXXXXX, 05XXXXXXXX ou 01XXXXXXXX.' });
+  }
+
+  let montant = 0;
+  for (const { annee, mois } of mois_couverts) {
+    const c = await assurerLigneCotisation(req.user.id, annee, mois);
+    montant += Math.max(0, Number(c.montant_du) - Number(c.montant_paye));
+  }
+  if (montant <= 0) return res.status(400).json({ message: 'Rien a payer sur cette selection.' });
+  // Le payeur debourse le du + un forfait fixe qui compense la commission Jeko (1,5%) sur ce paiement,
+  // pour que l'AEA recoive malgre tout le montant du complet.
+  const montantCharge = montant + FRAIS_PLATEFORME_FCFA;
+  // 1 XOF = 100 centimes (jeko://docs/payments/introduction) : amountCents est TOUJOURS en centimes,
+  // meme pour le XOF. montantCharge est un nombre entier de FCFA, donc *100 est deja un multiple de 100.
+  const amountCents = montantCharge * 100;
+
+  const reference = `COT-${req.user.id}-${Date.now()}`;
+  // Jeko (et les operateurs derriere) refusent une successUrl/errorUrl pointant sur localhost :
+  // on passe donc par une URL publique du backend (PUBLIC_BACKEND_URL, ex. le tunnel ngrok en dev)
+  // qui se contente de rediriger ensuite le navigateur vers le frontend reel (voir GET /paiement-retour).
+  const basePublique = process.env.PUBLIC_BACKEND_URL;
+  if (!basePublique) {
+    return res.status(503).json({ message: "PUBLIC_BACKEND_URL n'est pas configure. Contactez le bureau." });
+  }
+
+  try {
+    const demande = await jeko.creerDemandePaiement({
+      amountCents,
+      reference,
+      paymentMethod: mode_paiement,
+      payerPhone: telephone,
+      successUrl: `${basePublique}/api/paiement-retour?statut=succes&reference=${reference}`,
+      errorUrl: `${basePublique}/api/paiement-retour?statut=erreur&reference=${reference}`,
+    });
+
+    await pool.query(
+      `INSERT INTO paiements_en_ligne (membre_id, reference, jeko_payment_request_id, payment_method, montant, montant_charge, mois_couverts, statut, redirect_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [req.user.id, reference, demande.id, demande.paymentMethod, montant, montantCharge, JSON.stringify(mois_couverts), demande.redirectUrl]
+    );
+
+    res.status(201).json({ reference, redirectUrl: demande.redirectUrl, paymentMethod: demande.paymentMethod, montant, montantCharge });
+  } catch (err) {
+    console.error('[jeko] creation demande de paiement echouee', err.jekoId || err.message);
+    res.status(502).json({ message: "Le paiement n'a pas pu etre initie aupres de l'operateur. Reessayez." });
+  }
+});
+
+// GET /api/cotisations/paiement-en-ligne/:reference -- statut d'une tentative (fallback si le webhook n'est pas encore arrive)
+router.get('/paiement-en-ligne/:reference', authenticate, async (req, res) => {
+  const [rows] = await pool.query('SELECT * FROM paiements_en_ligne WHERE reference = ? AND membre_id = ?', [
+    req.params.reference,
+    req.user.id,
+  ]);
+  if (!rows.length) return res.status(404).json({ message: 'Paiement introuvable.' });
+  let ligne = rows[0];
+
+  if (ligne.statut === 'pending' && ligne.jeko_payment_request_id) {
+    try {
+      const demande = await jeko.recupererDemandePaiement(ligne.jeko_payment_request_id);
+      if (demande.status !== 'pending') {
+        await finaliserPaiementEnLigne(ligne.id, demande);
+        const [rafraichi] = await pool.query('SELECT * FROM paiements_en_ligne WHERE id = ?', [ligne.id]);
+        ligne = rafraichi[0];
+      }
+    } catch (err) {
+      console.error('[jeko] interrogation demande de paiement echouee', err.jekoId || err.message);
+    }
+  }
+
+  res.json({
+    statut: ligne.statut,
+    montant: ligne.montant,
+    montantCharge: ligne.montant_charge,
+    payment_method: ligne.payment_method,
+    error_reason: ligne.error_reason,
+  });
 });
 
 module.exports = router;

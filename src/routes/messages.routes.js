@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../config/db');
-const { authenticate, authorize, BUREAU_ROLES } = require('../middleware/auth');
+const { authenticate, BUREAU_ROLES } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 const { makeUploader } = require('../middleware/upload');
 const { notifyUser, notifyUsers } = require('../utils/notify');
 
@@ -78,7 +79,7 @@ router.post('/prive', authenticate, uploadPieceJointe.single('piece_jointe'), as
 router.post(
   '/broadcast',
   authenticate,
-  authorize(...BUREAU_ROLES),
+  requirePermission('messages.diffuser'),
   uploadPieceJointe.single('piece_jointe'),
   async (req, res) => {
     const { contenu, groupe_cible, cible_type } = req.body;

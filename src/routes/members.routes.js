@@ -2,7 +2,8 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const pool = require('../config/db');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 const { makeUploader } = require('../middleware/upload');
 const { logAudit } = require('../utils/audit');
 const { notifyUser, broadcast } = require('../utils/notify');
@@ -62,13 +63,13 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // GET /api/membres/en-attente -- MEM-01 validation d'inscription
-router.get('/en-attente', authenticate, authorize('secretaire_general', 'super_admin'), async (req, res) => {
+router.get('/en-attente', authenticate, requirePermission('membres.voir_en_attente'), async (req, res) => {
   const [rows] = await pool.query(`SELECT ${SAFE_FIELDS} FROM users WHERE statut = 'en_attente' ORDER BY created_at`);
   res.json(rows);
 });
 
 // POST /api/membres -- creation directe d'un membre par le bureau (sans passer par l'auto-inscription)
-router.post('/', authenticate, authorize('super_admin', 'president', 'secretaire_general'), async (req, res) => {
+router.post('/', authenticate, requirePermission('membres.creer'), async (req, res) => {
   const { nom, prenom, email, telephone, password, filiere, niveau, promotion, role, statut } = req.body;
   if (!nom || !prenom || !email || !telephone) {
     return res.status(400).json({ message: 'Nom, prenom, e-mail et telephone sont requis.' });
@@ -133,7 +134,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // PATCH /api/membres/:id/statut -- MEM-05 (validation inscription, suspension, etc.)
-router.patch('/:id/statut', authenticate, authorize('secretaire_general', 'super_admin', 'president'), async (req, res) => {
+router.patch('/:id/statut', authenticate, requirePermission('membres.changer_statut'), async (req, res) => {
   const { statut } = req.body;
   const allowed = ['actif', 'inactif', 'suspendu', 'honoraire'];
   if (!allowed.includes(statut)) return res.status(400).json({ message: 'Statut invalide.' });
@@ -166,7 +167,7 @@ router.patch('/:id/statut', authenticate, authorize('secretaire_general', 'super
 });
 
 // PATCH /api/membres/:id/role -- gestion des roles (bureau)
-router.patch('/:id/role', authenticate, authorize('super_admin', 'president'), async (req, res) => {
+router.patch('/:id/role', authenticate, requirePermission('membres.changer_role'), async (req, res) => {
   const { role } = req.body;
   const allowed = ['membre', 'tresorier', 'secretaire_general', 'resp_communication', 'president', 'super_admin'];
   if (!allowed.includes(role)) return res.status(400).json({ message: 'Role invalide.' });
@@ -206,7 +207,7 @@ router.put('/:id', authenticate, uploadPhoto.single('photo'), async (req, res) =
 });
 
 // DELETE /api/membres/:id -- droit RGPD-like (loi CI 2013-450) : suppression sur demande
-router.delete('/:id', authenticate, authorize('super_admin', 'secretaire_general'), async (req, res) => {
+router.delete('/:id', authenticate, requirePermission('membres.supprimer'), async (req, res) => {
   await pool.query(
     `UPDATE users SET nom = 'Membre', prenom = 'Supprime', email = CONCAT('supprime-', id, '@aea.local'),
      telephone = CONCAT('supprime-', id), photo = NULL, statut = 'inactif' WHERE id = ?`,

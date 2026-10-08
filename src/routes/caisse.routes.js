@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../config/db');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 const { makeUploader } = require('../middleware/upload');
 const { logAudit } = require('../utils/audit');
 const { notifyUsers, broadcast } = require('../utils/notify');
@@ -10,12 +11,18 @@ const uploadJustificatif = makeUploader('justificatifs');
 
 const SEUIL_DOUBLE_VALIDATION = 25000;
 
+// Les frais de transaction en ligne (surcharge compensant la commission Jeko, voir
+// FRAIS_PLATEFORME_FCFA) sont visibles dans le detail des operations pour la tracabilite, mais
+// exclus des totaux/soldes affiches : seules les sommes definies par l'admin (bareme cotisations,
+// operations manuelles) comptent dans le solde de l'association.
+const EXCLURE_FRAIS_TRANSACTION = "AND categorie <> 'Frais de transaction'";
+
 async function calculerSolde() {
   const [rows] = await pool.query(
     `SELECT
        COALESCE(SUM(CASE WHEN type = 'entree' THEN montant ELSE 0 END), 0) -
        COALESCE(SUM(CASE WHEN type = 'sortie' THEN montant ELSE 0 END), 0) AS solde
-     FROM caisse_operations WHERE statut = 'validee'`
+     FROM caisse_operations WHERE statut = 'validee' ${EXCLURE_FRAIS_TRANSACTION}`
   );
   return Number(rows[0].solde);
 }
@@ -27,7 +34,7 @@ router.get('/solde', authenticate, async (req, res) => {
     `SELECT fonds,
        COALESCE(SUM(CASE WHEN type = 'entree' THEN montant ELSE 0 END), 0) -
        COALESCE(SUM(CASE WHEN type = 'sortie' THEN montant ELSE 0 END), 0) AS solde
-     FROM caisse_operations WHERE statut = 'validee' GROUP BY fonds`
+     FROM caisse_operations WHERE statut = 'validee' ${EXCLURE_FRAIS_TRANSACTION} GROUP BY fonds`
   );
   res.json({ solde, parFonds });
 });
@@ -39,7 +46,7 @@ router.get('/mois-courant', authenticate, async (req, res) => {
        COALESCE(SUM(CASE WHEN type = 'entree' THEN montant ELSE 0 END), 0) AS entrees,
        COALESCE(SUM(CASE WHEN type = 'sortie' THEN montant ELSE 0 END), 0) AS sorties
      FROM caisse_operations
-     WHERE statut = 'validee' AND MONTH(date_operation) = MONTH(CURDATE()) AND YEAR(date_operation) = YEAR(CURDATE())`
+     WHERE statut = 'validee' AND MONTH(date_operation) = MONTH(CURDATE()) AND YEAR(date_operation) = YEAR(CURDATE()) ${EXCLURE_FRAIS_TRANSACTION}`
   );
   res.json(rows[0]);
 });
@@ -50,14 +57,14 @@ router.get('/evolution', authenticate, async (req, res) => {
     `SELECT DATE_FORMAT(date_operation, '%Y-%m') AS mois,
        COALESCE(SUM(CASE WHEN type = 'entree' THEN montant ELSE -montant END), 0) AS variation
      FROM caisse_operations
-     WHERE statut = 'validee' AND date_operation >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+     WHERE statut = 'validee' AND date_operation >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH) ${EXCLURE_FRAIS_TRANSACTION}
      GROUP BY mois ORDER BY mois`
   );
 
   // solde cumule avant la periode
   const [avant] = await pool.query(
     `SELECT COALESCE(SUM(CASE WHEN type = 'entree' THEN montant ELSE -montant END), 0) AS solde
-     FROM caisse_operations WHERE statut = 'validee' AND date_operation < DATE_SUB(CURDATE(), INTERVAL 12 MONTH)`
+     FROM caisse_operations WHERE statut = 'validee' AND date_operation < DATE_SUB(CURDATE(), INTERVAL 12 MONTH) ${EXCLURE_FRAIS_TRANSACTION}`
   );
 
   let cumul = Number(avant[0].solde);
@@ -92,7 +99,7 @@ router.get('/operations', authenticate, async (req, res) => {
 router.post(
   '/operations',
   authenticate,
-  authorize('tresorier', 'super_admin'),
+  requirePermission('caisse.saisir_operation'),
   uploadJustificatif.single('justificatif'),
   async (req, res) => {
     const { type, fonds, categorie, libelle, montant, date_operation } = req.body;
@@ -138,7 +145,7 @@ router.post(
 );
 
 // PATCH /api/caisse/operations/:id/valider -- validation President (double validation)
-router.patch('/operations/:id/valider', authenticate, authorize('president', 'super_admin'), async (req, res) => {
+router.patch('/operations/:id/valider', authenticate, requirePermission('caisse.valider_operation'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM caisse_operations WHERE id = ?', [req.params.id]);
   if (!rows.length) return res.status(404).json({ message: 'Operation introuvable.' });
   if (rows[0].statut !== 'en_attente_validation') {
@@ -168,7 +175,7 @@ router.patch('/operations/:id/valider', authenticate, authorize('president', 'su
 });
 
 // POST /api/caisse/operations/:id/annuler -- pas de suppression, ecriture d'annulation (regle de confiance)
-router.post('/operations/:id/annuler', authenticate, authorize('tresorier', 'super_admin'), async (req, res) => {
+router.post('/operations/:id/annuler', authenticate, requirePermission('caisse.annuler_operation'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM caisse_operations WHERE id = ?', [req.params.id]);
   if (!rows.length) return res.status(404).json({ message: 'Operation introuvable.' });
   const original = rows[0];

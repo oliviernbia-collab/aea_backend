@@ -16,6 +16,7 @@ const app = require('./app');
 const { setIo: setNotifyIo } = require('./utils/notify');
 const { setIo: setMessagesIo } = require('./routes/messages.routes');
 const { startScheduler } = require('./jobs/scheduler');
+const { ensureDefaultPermissions } = require('./middleware/permissions');
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -43,6 +44,10 @@ setMessagesIo(io);
 startScheduler();
 
 const PORT = process.env.PORT || 4000;
-server.listen(PORT, () => {
-  console.log(`API AEA demarree sur http://localhost:${PORT}`);
-});
+ensureDefaultPermissions()
+  .catch((err) => console.error('[permissions] initialisation des droits par defaut echouee', err))
+  .finally(() => {
+    server.listen(PORT, () => {
+      console.log(`API AEA demarree sur http://localhost:${PORT}`);
+    });
+  });

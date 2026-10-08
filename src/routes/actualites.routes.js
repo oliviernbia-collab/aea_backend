@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../config/db');
-const { authenticate, authorize, BUREAU_ROLES } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 const { makeUploader } = require('../middleware/upload');
 const { notifyUsers, broadcast } = require('../utils/notify');
 
@@ -44,7 +45,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // POST /api/actualites -- ACT-01, ACT-04
-router.post('/', authenticate, authorize(...BUREAU_ROLES), uploadImage.single('image'), async (req, res) => {
+router.post('/', authenticate, requirePermission('actualites.gerer'), uploadImage.single('image'), async (req, res) => {
   const { titre, texte, categorie, visibilite, epingle } = req.body;
   if (!titre || !texte || !categorie) return res.status(400).json({ message: 'Titre, texte et categorie requis.' });
 
@@ -63,7 +64,7 @@ router.post('/', authenticate, authorize(...BUREAU_ROLES), uploadImage.single('i
 });
 
 // PATCH /api/actualites/:id -- edition / epingler (ACT-03)
-router.patch('/:id', authenticate, authorize(...BUREAU_ROLES), uploadImage.single('image'), async (req, res) => {
+router.patch('/:id', authenticate, requirePermission('actualites.gerer'), uploadImage.single('image'), async (req, res) => {
   const { titre, texte, categorie, visibilite, epingle } = req.body;
   const fields = [];
   const params = [];
@@ -82,7 +83,7 @@ router.patch('/:id', authenticate, authorize(...BUREAU_ROLES), uploadImage.singl
 });
 
 // DELETE /api/actualites/:id
-router.delete('/:id', authenticate, authorize(...BUREAU_ROLES), async (req, res) => {
+router.delete('/:id', authenticate, requirePermission('actualites.gerer'), async (req, res) => {
   await pool.query('DELETE FROM actualites WHERE id = ?', [req.params.id]);
   broadcast('actualites:update');
   res.json({ message: 'Actualite supprimee.' });
