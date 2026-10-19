@@ -24,7 +24,7 @@ function publierReleveMensuel() {
       const [membres] = await pool.query(`SELECT id FROM users WHERE statut = 'actif'`);
       await notifyUsers(membres.map((m) => m.id), {
         type: 'releve_mensuel',
-        titre: 'Releve mensuel de la caisse disponible',
+        titre: 'Relevé mensuel de la caisse disponible',
         lien: '/actualites',
       });
     } catch (err) {
@@ -45,8 +45,8 @@ function relancerCotisations() {
       );
       await notifyUsers(retard.map((r) => r.membre_id), {
         type: 'relance_cotisation',
-        titre: 'Rappel : cotisation du mois non reglee',
-        contenu: 'Merci de regulariser votre cotisation aupres du tresorier.',
+        titre: 'Rappel : cotisation du mois non réglée',
+        contenu: 'Merci de régulariser votre cotisation auprès du trésorier.',
         lien: '/cotisations/ma-fiche',
       });
     } catch (err) {

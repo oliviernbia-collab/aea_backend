@@ -7,11 +7,13 @@ const router = express.Router();
 
 // GET /api/journal -- journal d'activite (lecture de journal_audit, deja alimente par logAudit)
 router.get('/', authenticate, requirePermission('journal.consulter'), async (req, res) => {
-  const { table, action, limit = 100, offset = 0 } = req.query;
+  const { table, action, date_debut, date_fin, limit = 100, offset = 0 } = req.query;
   const conditions = [];
   const params = [];
   if (table) { conditions.push('j.table_name = ?'); params.push(table); }
   if (action) { conditions.push('j.action = ?'); params.push(action); }
+  if (date_debut) { conditions.push('DATE(j.created_at) >= ?'); params.push(date_debut); }
+  if (date_fin) { conditions.push('DATE(j.created_at) <= ?'); params.push(date_fin); }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const [rows] = await pool.query(

@@ -63,7 +63,7 @@ router.post('/config', authenticate, requirePermission('cotisations.configurer')
   }
 
   broadcast('cotisations:update');
-  res.json({ message: 'Configuration des cotisations mise a jour.' });
+  res.json({ message: 'Configuration des cotisations mise à jour.' });
 });
 
 // GET /api/cotisations/tableau -- COT-02, COT-03 (membres x mois avec filtres)
@@ -173,7 +173,7 @@ router.get('/ma-fiche', authenticate, async (req, res) => {
 router.post('/paiements', authenticate, requirePermission('cotisations.saisir_paiement'), async (req, res) => {
   const { membre_id, montant, date_paiement, mode_paiement, mois_couverts } = req.body;
   if (!Array.isArray(mois_couverts) || !mois_couverts.length) {
-    return res.status(400).json({ message: 'Precisez au moins un mois couvert (ou le droit d\'adhesion).' });
+    return res.status(400).json({ message: 'Précisez au moins un mois couvert (ou le droit d\'adhésion).' });
   }
 
   const recuNumero = `AEA-RECU-${Date.now()}`;
@@ -196,8 +196,8 @@ router.post('/paiements', authenticate, requirePermission('cotisations.saisir_pa
 
   await notifyUser(membre_id, {
     type: 'paiement_recu',
-    titre: 'Recu de paiement',
-    contenu: `Votre paiement de ${montant} FCFA (recu ${recuNumero}) a ete enregistre.`,
+    titre: 'Reçu de paiement',
+    contenu: `Votre paiement de ${montant} FCFA (reçu ${recuNumero}) a été enregistré.`,
     lien: '/cotisations/ma-fiche',
   });
 
@@ -210,7 +210,7 @@ router.post('/paiements', authenticate, requirePermission('cotisations.saisir_pa
 router.post('/declarations', authenticate, uploadPreuve.single('preuve'), async (req, res) => {
   const { montant, date_paiement, mode_paiement, mois_couverts } = req.body;
   const moisArray = JSON.parse(mois_couverts || '[]');
-  if (!req.file) return res.status(400).json({ message: 'Capture d\'ecran de la preuve de paiement requise.' });
+  if (!req.file) return res.status(400).json({ message: 'Capture d\'écran de la preuve de paiement requise.' });
 
   const [result] = await pool.query(
     `INSERT INTO paiements (membre_id, montant, date_paiement, mode_paiement, mois_couverts, preuve_capture, statut_validation, saisi_par)
@@ -223,22 +223,22 @@ router.post('/declarations', authenticate, uploadPreuve.single('preuve'), async 
     tresoriers.map((t) =>
       notifyUser(t.id, {
         type: 'declaration_paiement',
-        titre: 'Declaration de paiement Mobile Money a valider',
-        contenu: `${montant} FCFA declares par un membre.`,
+        titre: 'Déclaration de paiement Mobile Money à valider',
+        contenu: `${montant} FCFA déclarés par un membre.`,
         lien: `/caisse/declarations/${result.insertId}`,
       })
     )
   );
 
-  res.status(201).json({ id: result.insertId, message: 'Declaration envoyee, en attente de validation du tresorier.' });
+  res.status(201).json({ id: result.insertId, message: 'Déclaration envoyée, en attente de validation du trésorier.' });
 });
 
 // PATCH /api/cotisations/declarations/:id/valider -- tresorier confirme la declaration COT-09
 router.patch('/declarations/:id/valider', authenticate, requirePermission('cotisations.valider_declaration'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM paiements WHERE id = ?', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ message: 'Declaration introuvable.' });
+  if (!rows.length) return res.status(404).json({ message: 'Déclaration introuvable.' });
   const paiement = rows[0];
-  if (paiement.statut_validation !== 'en_attente') return res.status(400).json({ message: 'Deja traitee.' });
+  if (paiement.statut_validation !== 'en_attente') return res.status(400).json({ message: 'Déjà traitée.' });
 
   const moisCouverts = typeof paiement.mois_couverts === 'string' ? JSON.parse(paiement.mois_couverts) : paiement.mois_couverts;
   await appliquerPaiementAuxCotisations(paiement.membre_id, moisCouverts, paiement.montant);
@@ -256,12 +256,12 @@ router.patch('/declarations/:id/valider', authenticate, requirePermission('cotis
 
   await notifyUser(paiement.membre_id, {
     type: 'declaration_validee',
-    titre: 'Votre declaration de paiement a ete validee',
+    titre: 'Votre déclaration de paiement a été validée',
   });
 
   broadcast('cotisations:update');
   broadcast('caisse:update');
-  res.json({ message: 'Declaration validee et cotisations mises a jour.' });
+  res.json({ message: 'Déclaration validée et cotisations mises à jour.' });
 });
 
 // POST /api/cotisations/paiement-en-ligne -- debit direct du compte Mobile Money du membre via Jeko (API direct)
@@ -272,15 +272,15 @@ router.post('/paiement-en-ligne', authenticate, async (req, res) => {
     return res.status(400).json({ message: 'Moyen de paiement invalide.' });
   }
   if (!Array.isArray(mois_couverts) || !mois_couverts.length) {
-    return res.status(400).json({ message: 'Precisez au moins un mois a payer.' });
+    return res.status(400).json({ message: 'Précisez au moins un mois à payer.' });
   }
   if (!jeko.estConfigure()) {
-    return res.status(503).json({ message: "Le paiement en ligne n'est pas encore configure. Contactez le bureau." });
+    return res.status(503).json({ message: "Le paiement en ligne n'est pas encore configuré. Contactez le bureau." });
   }
 
   const telephone = jeko.normaliserTelephoneCI(payer_phone);
   if (!telephone) {
-    return res.status(422).json({ message: 'Numero mobile invalide. Format attendu : 07XXXXXXXX, 05XXXXXXXX ou 01XXXXXXXX.' });
+    return res.status(422).json({ message: 'Numéro mobile invalide. Format attendu : 07XXXXXXXX, 05XXXXXXXX ou 01XXXXXXXX.' });
   }
 
   let montant = 0;
@@ -288,7 +288,7 @@ router.post('/paiement-en-ligne', authenticate, async (req, res) => {
     const c = await assurerLigneCotisation(req.user.id, annee, mois);
     montant += Math.max(0, Number(c.montant_du) - Number(c.montant_paye));
   }
-  if (montant <= 0) return res.status(400).json({ message: 'Rien a payer sur cette selection.' });
+  if (montant <= 0) return res.status(400).json({ message: 'Rien à payer sur cette sélection.' });
   // Le payeur debourse le du + un forfait fixe qui compense la commission Jeko (1,5%) sur ce paiement,
   // pour que l'AEA recoive malgre tout le montant du complet.
   const montantCharge = montant + FRAIS_PLATEFORME_FCFA;
@@ -302,7 +302,7 @@ router.post('/paiement-en-ligne', authenticate, async (req, res) => {
   // qui se contente de rediriger ensuite le navigateur vers le frontend reel (voir GET /paiement-retour).
   const basePublique = process.env.PUBLIC_BACKEND_URL;
   if (!basePublique) {
-    return res.status(503).json({ message: "PUBLIC_BACKEND_URL n'est pas configure. Contactez le bureau." });
+    return res.status(503).json({ message: "PUBLIC_BACKEND_URL n'est pas configuré. Contactez le bureau." });
   }
 
   try {
@@ -324,7 +324,7 @@ router.post('/paiement-en-ligne', authenticate, async (req, res) => {
     res.status(201).json({ reference, redirectUrl: demande.redirectUrl, paymentMethod: demande.paymentMethod, montant, montantCharge });
   } catch (err) {
     console.error('[jeko] creation demande de paiement echouee', err.jekoId || err.message);
-    res.status(502).json({ message: "Le paiement n'a pas pu etre initie aupres de l'operateur. Reessayez." });
+    res.status(502).json({ message: "Le paiement n'a pas pu être initié auprès de l'opérateur. Réessayez." });
   }
 });
 
@@ -356,6 +356,7 @@ router.get('/paiement-en-ligne/:reference', authenticate, async (req, res) => {
     montantCharge: ligne.montant_charge,
     payment_method: ligne.payment_method,
     error_reason: ligne.error_reason,
+    paiement_id: ligne.paiement_id,
   });
 });
 

@@ -19,6 +19,11 @@ const { monterWebhookJeko } = require('./webhooks/jeko.webhook');
 
 const app = express();
 
+// Necessaire derriere le reverse proxy/CDN de l'hebergeur (edge Varnish) : sans ca,
+// express-rate-limit rejette les requetes en voyant un X-Forwarded-For alors que
+// 'trust proxy' est a false par defaut.
+app.set('trust proxy', 1);
+
 app.use(
   helmet({
     // API pure (pas de pages HTML rendues ici) : CSP par defaut inutile et risque de gener
@@ -66,7 +71,19 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/permissions', permissionsRoutes);
 app.use('/api/journal', journalRoutes);
 
-app.use((req, res) => res.status(404).json({ message: 'Route introuvable.' }));
+app.use('/api', (req, res) => res.status(404).json({ message: 'Route introuvable.' }));
+
+// Sert le build du frontend (React) depuis le meme serveur/domaine : en production, un seul
+// deploiement Node gere API + fichiers statiques, pas besoin de sous-domaine/docroot separe
+// pour le frontend (voir deploiement cPanel/Passenger).
+const FRONTEND_DIST = path.join(__dirname, '..', 'public');
+app.use(express.static(FRONTEND_DIST));
+
+// Fallback SPA : toute route non-API (ex. /cotisations/ma-fiche rechargee directement) doit
+// renvoyer index.html pour laisser React Router gerer le routage cote client.
+app.get('*', (req, res) => {
+  res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
+});
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {

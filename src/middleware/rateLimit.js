@@ -7,7 +7,7 @@ const apiLimiter = rateLimit({
   limit: 600,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { message: 'Trop de requetes. Reessayez dans quelques minutes.' },
+  message: { message: 'Trop de requêtes. Réessayez dans quelques minutes.' },
 });
 
 // Limite stricte sur les tentatives de connexion/inscription/reinitialisation de mot de passe
@@ -18,7 +18,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  message: { message: 'Trop de tentatives. Reessayez dans quelques minutes.' },
+  message: { message: 'Trop de tentatives. Réessayez dans quelques minutes.' },
 });
 
 module.exports = { apiLimiter, authLimiter };

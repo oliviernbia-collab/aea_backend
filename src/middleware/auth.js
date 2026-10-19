@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { BUREAU_ROLES } = require('../config/permissions');
 
 function authenticate(req, res, next) {
   const header = req.headers.authorization;
@@ -11,7 +12,7 @@ function authenticate(req, res, next) {
     req.user = payload;
     next();
   } catch (err) {
-    return res.status(401).json({ message: 'Session invalide ou expiree.' });
+    return res.status(401).json({ message: 'Session invalide ou expirée.' });
   }
 }
 
@@ -23,7 +24,5 @@ function authorize(...roles) {
     next();
   };
 }
-
-const BUREAU_ROLES = ['super_admin', 'president', 'tresorier', 'secretaire_general', 'resp_communication'];
 
 module.exports = { authenticate, authorize, BUREAU_ROLES };

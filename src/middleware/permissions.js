@@ -58,7 +58,7 @@ function requirePermission(key) {
       next();
     } catch (err) {
       console.error(err);
-      res.status(500).json({ message: 'Erreur lors de la verification des droits.' });
+      res.status(500).json({ message: 'Erreur lors de la vérification des droits.' });
     }
   };
 }

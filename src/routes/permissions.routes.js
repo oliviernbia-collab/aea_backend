@@ -35,7 +35,7 @@ router.get('/', authenticate, requirePermission('permissions.gerer'), async (req
 router.put('/', authenticate, requirePermission('permissions.gerer'), async (req, res) => {
   const { role, key, autorise } = req.body;
   if (!ROLES.includes(role) || role === 'super_admin') {
-    return res.status(400).json({ message: 'Role invalide.' });
+    return res.status(400).json({ message: 'Rôle invalide.' });
   }
   if (!PERMISSIONS.some((p) => p.key === key)) {
     return res.status(400).json({ message: 'Permission inconnue.' });
@@ -57,7 +57,7 @@ router.put('/', authenticate, requirePermission('permissions.gerer'), async (req
   });
 
   broadcast('permissions:update');
-  res.json({ message: 'Droit mis a jour.' });
+  res.json({ message: 'Droit mis à jour.' });
 });
 
 module.exports = router;

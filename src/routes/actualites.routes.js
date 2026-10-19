@@ -40,14 +40,14 @@ router.get('/:id', authenticate, async (req, res) => {
     `SELECT a.*, u.nom AS auteur_nom, u.prenom AS auteur_prenom FROM actualites a JOIN users u ON u.id = a.auteur_id WHERE a.id = ?`,
     [req.params.id]
   );
-  if (!rows.length) return res.status(404).json({ message: 'Actualite introuvable.' });
+  if (!rows.length) return res.status(404).json({ message: 'Actualité introuvable.' });
   res.json(rows[0]);
 });
 
 // POST /api/actualites -- ACT-01, ACT-04
 router.post('/', authenticate, requirePermission('actualites.gerer'), uploadImage.single('image'), async (req, res) => {
   const { titre, texte, categorie, visibilite, epingle } = req.body;
-  if (!titre || !texte || !categorie) return res.status(400).json({ message: 'Titre, texte et categorie requis.' });
+  if (!titre || !texte || !categorie) return res.status(400).json({ message: 'Titre, texte et catégorie requis.' });
 
   const image = req.file ? req.file.path : null;
   const [result] = await pool.query(
@@ -57,7 +57,7 @@ router.post('/', authenticate, requirePermission('actualites.gerer'), uploadImag
   );
 
   const [membres] = await pool.query(`SELECT id FROM users WHERE statut = 'actif'`);
-  await notifyUsers(membres.map((m) => m.id), { type: 'actualite', titre: 'Nouvelle actualite', contenu: titre, lien: `/actualites/${result.insertId}` });
+  await notifyUsers(membres.map((m) => m.id), { type: 'actualite', titre: 'Nouvelle actualité', contenu: titre, lien: `/actualites/${result.insertId}` });
 
   broadcast('actualites:update');
   res.status(201).json({ id: result.insertId });
@@ -74,19 +74,19 @@ router.patch('/:id', authenticate, requirePermission('actualites.gerer'), upload
   }
   if (epingle !== undefined) { fields.push('epingle = ?'); params.push(epingle === 'true' || epingle === true ? 1 : 0); }
   if (req.file) { fields.push('image = ?'); params.push(req.file.path); }
-  if (!fields.length) return res.status(400).json({ message: 'Aucune donnee a mettre a jour.' });
+  if (!fields.length) return res.status(400).json({ message: 'Aucune donnée à mettre à jour.' });
 
   params.push(req.params.id);
   await pool.query(`UPDATE actualites SET ${fields.join(', ')} WHERE id = ?`, params);
   broadcast('actualites:update');
-  res.json({ message: 'Actualite mise a jour.' });
+  res.json({ message: 'Actualité mise à jour.' });
 });
 
 // DELETE /api/actualites/:id
 router.delete('/:id', authenticate, requirePermission('actualites.gerer'), async (req, res) => {
   await pool.query('DELETE FROM actualites WHERE id = ?', [req.params.id]);
   broadcast('actualites:update');
-  res.json({ message: 'Actualite supprimee.' });
+  res.json({ message: 'Actualité supprimée.' });
 });
 
 module.exports = router;

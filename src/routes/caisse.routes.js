@@ -77,13 +77,15 @@ router.get('/evolution', authenticate, async (req, res) => {
 
 // GET /api/caisse/operations -- CAI-04
 router.get('/operations', authenticate, async (req, res) => {
-  const { type, categorie, fonds, statut, limit = 50, offset = 0 } = req.query;
+  const { type, categorie, fonds, statut, date_debut, date_fin, limit = 50, offset = 0 } = req.query;
   const conditions = [];
   const params = [];
   if (type) { conditions.push('co.type = ?'); params.push(type); }
   if (categorie) { conditions.push('co.categorie = ?'); params.push(categorie); }
   if (fonds) { conditions.push('co.fonds = ?'); params.push(fonds); }
   if (statut) { conditions.push('co.statut = ?'); params.push(statut); }
+  if (date_debut) { conditions.push('co.date_operation >= ?'); params.push(date_debut); }
+  if (date_fin) { conditions.push('co.date_operation <= ?'); params.push(date_fin); }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const [rows] = await pool.query(
@@ -132,8 +134,8 @@ router.post(
         presidents.map((p) => p.id),
         {
           type: 'validation_depense',
-          titre: 'Depense en attente de votre validation',
-          contenu: `${libelle} - ${montantNum} FCFA depasse le seuil de ${SEUIL_DOUBLE_VALIDATION} FCFA.`,
+          titre: 'Dépense en attente de votre validation',
+          contenu: `${libelle} - ${montantNum} FCFA dépasse le seuil de ${SEUIL_DOUBLE_VALIDATION} FCFA.`,
           lien: `/caisse/operations/${result.insertId}`,
         }
       );
@@ -147,9 +149,9 @@ router.post(
 // PATCH /api/caisse/operations/:id/valider -- validation President (double validation)
 router.patch('/operations/:id/valider', authenticate, requirePermission('caisse.valider_operation'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM caisse_operations WHERE id = ?', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ message: 'Operation introuvable.' });
+  if (!rows.length) return res.status(404).json({ message: 'Opération introuvable.' });
   if (rows[0].statut !== 'en_attente_validation') {
-    return res.status(400).json({ message: "Cette operation n'attend pas de validation." });
+    return res.status(400).json({ message: "Cette opération n'attend pas de validation." });
   }
 
   await pool.query('UPDATE caisse_operations SET statut = ?, valide_par = ? WHERE id = ?', [
@@ -166,20 +168,20 @@ router.patch('/operations/:id/valider', authenticate, requirePermission('caisse.
   });
   await notifyUsers([rows[0].saisi_par], {
     type: 'depense_validee',
-    titre: 'Depense validee par le President',
+    titre: 'Dépense validée par le Président',
     contenu: `${rows[0].libelle} - ${rows[0].montant} FCFA`,
   });
 
   broadcast('caisse:update');
-  res.json({ message: 'Operation validee.' });
+  res.json({ message: 'Opération validée.' });
 });
 
 // POST /api/caisse/operations/:id/annuler -- pas de suppression, ecriture d'annulation (regle de confiance)
 router.post('/operations/:id/annuler', authenticate, requirePermission('caisse.annuler_operation'), async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM caisse_operations WHERE id = ?', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ message: 'Operation introuvable.' });
+  if (!rows.length) return res.status(404).json({ message: 'Opération introuvable.' });
   const original = rows[0];
-  if (original.statut === 'annulee') return res.status(400).json({ message: 'Operation deja annulee.' });
+  if (original.statut === 'annulee') return res.status(400).json({ message: 'Opération déjà annulée.' });
 
   const typeInverse = original.type === 'entree' ? 'sortie' : 'entree';
   const [result] = await pool.query(
@@ -199,7 +201,7 @@ router.post('/operations/:id/annuler', authenticate, requirePermission('caisse.a
   });
 
   broadcast('caisse:update');
-  res.json({ message: 'Operation annulee via une ecriture inverse visible.', ecritureAnnulationId: result.insertId });
+  res.json({ message: 'Opération annulée via une écriture inverse visible.', ecritureAnnulationId: result.insertId });
 });
 
 // POST /api/caisse/signalements -- signalement d'anomalie par un membre
@@ -217,7 +219,7 @@ router.post('/signalements', authenticate, async (req, res) => {
   );
   await notifyUsers(bureau.map((b) => b.id), {
     type: 'signalement',
-    titre: 'Anomalie signalee par un membre',
+    titre: 'Anomalie signalée par un membre',
     contenu: message,
   });
 

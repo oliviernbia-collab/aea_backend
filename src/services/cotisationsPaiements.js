@@ -101,8 +101,8 @@ async function finaliserPaiementEnLigne(id, transactionJeko) {
 
     await notifyUser(ligne.membre_id, {
       type: 'paiement_recu',
-      titre: 'Paiement recu',
-      contenu: `Votre paiement de ${ligne.montant} FCFA via ${ligne.payment_method} a ete confirme.`,
+      titre: 'Paiement reçu',
+      contenu: `Votre paiement de ${ligne.montant} FCFA via ${ligne.payment_method} a été confirmé.`,
       lien: '/cotisations/ma-fiche',
     });
     broadcast('cotisations:update');

@@ -49,7 +49,7 @@ router.post(
     try {
       const [existing] = await pool.query('SELECT id FROM users WHERE email = ? OR telephone = ?', [email, telephone]);
       if (existing.length) {
-        return res.status(409).json({ message: 'Un compte existe deja avec cet e-mail ou ce telephone.' });
+        return res.status(409).json({ message: 'Un compte existe déjà avec cet e-mail ou ce téléphone.' });
       }
 
       const numeroMembre = await genererNumeroMembre();
@@ -68,14 +68,14 @@ router.post(
         secretaires.map((s) => s.id),
         {
           type: 'inscription',
-          titre: 'Nouvelle inscription a valider',
-          contenu: `${prenom} ${nom} (${numeroMembre}) a demande son inscription.`,
+          titre: 'Nouvelle inscription à valider',
+          contenu: `${prenom} ${nom} (${numeroMembre}) a demandé son inscription.`,
           lien: `/administration/membres/${result.insertId}`,
         }
       );
 
       res.status(201).json({
-        message: 'Inscription enregistree. Elle sera validee par le Secretaire General.',
+        message: 'Inscription enregistrée. Elle sera validée par le Secrétaire Général.',
         numeroMembre,
       });
     } catch (err) {
@@ -147,7 +147,7 @@ router.post('/mot-de-passe-oublie', [body('identifiant').notEmpty()], async (req
     // NOTE: envoi reel par SMS/e-mail a brancher sur un fournisseur (voir NOT-04, 5.1)
     console.log(`[reset-password] token pour user ${rows[0].id}: ${token}`);
   }
-  res.json({ message: 'Si ce compte existe, des instructions ont ete envoyees.' });
+  res.json({ message: 'Si ce compte existe, des instructions ont été envoyées.' });
 });
 
 // PUT /api/auth/mot-de-passe -- changement de mot de passe par le membre connecte
@@ -169,7 +169,7 @@ router.put(
 
       const passwordHash = await bcrypt.hash(nouveauMotDePasse, 10);
       await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, req.user.id]);
-      res.json({ message: 'Mot de passe mis a jour.' });
+      res.json({ message: 'Mot de passe mis à jour.' });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: 'Erreur lors du changement de mot de passe.' });
@@ -186,12 +186,12 @@ router.post(
       'SELECT * FROM password_resets WHERE token = ? AND used = 0 AND expires_at > NOW()',
       [token]
     );
-    if (!rows.length) return res.status(400).json({ message: 'Lien invalide ou expire.' });
+    if (!rows.length) return res.status(400).json({ message: 'Lien invalide ou expiré.' });
 
     const passwordHash = await bcrypt.hash(password, 10);
     await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, rows[0].user_id]);
     await pool.query('UPDATE password_resets SET used = 1 WHERE id = ?', [rows[0].id]);
-    res.json({ message: 'Mot de passe mis a jour.' });
+    res.json({ message: 'Mot de passe mis à jour.' });
   }
 );
 
@@ -203,7 +203,7 @@ router.post('/2fa/verifier', [body('tempToken').notEmpty(), body('code').notEmpt
     try {
       payload = jwt.verify(tempToken, process.env.JWT_SECRET);
     } catch (err) {
-      return res.status(401).json({ message: 'Session de connexion expiree, recommencez.' });
+      return res.status(401).json({ message: 'Session de connexion expirée, recommencez.' });
     }
     if (payload.purpose !== '2fa_pending') return res.status(400).json({ message: 'Jeton invalide.' });
 
@@ -212,13 +212,13 @@ router.post('/2fa/verifier', [body('tempToken').notEmpty(), body('code').notEmpt
 
     const user = rows[0];
     const resultat = await otplib.verify({ secret: user.two_fa_secret, token: String(code).trim() });
-    if (!resultat.valid) return res.status(401).json({ message: 'Code incorrect ou expire.' });
+    if (!resultat.valid) return res.status(401).json({ message: 'Code incorrect ou expiré.' });
 
     const token = signToken(user);
     res.json({ token, user: publicUser(user) });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Erreur lors de la verification du code.' });
+    res.status(500).json({ message: 'Erreur lors de la vérification du code.' });
   }
 });
 
@@ -227,7 +227,7 @@ router.post('/2fa/init', authenticate, async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [req.user.id]);
     if (!rows.length) return res.status(404).json({ message: 'Membre introuvable.' });
-    if (rows[0].two_fa_enabled) return res.status(400).json({ message: 'La double authentification est deja active.' });
+    if (rows[0].two_fa_enabled) return res.status(400).json({ message: 'La double authentification est déjà active.' });
 
     const secret = otplib.generateSecret();
     await pool.query('UPDATE users SET two_fa_secret = ? WHERE id = ?', [secret, req.user.id]);
@@ -251,7 +251,7 @@ router.post('/2fa/activer', authenticate, [body('code').notEmpty()], async (req,
     if (!resultat.valid) return res.status(400).json({ message: 'Code incorrect.' });
 
     await pool.query('UPDATE users SET two_fa_enabled = 1 WHERE id = ?', [req.user.id]);
-    res.json({ message: 'Double authentification activee.' });
+    res.json({ message: 'Double authentification activée.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur lors de l'activation de la double authentification." });
@@ -268,10 +268,10 @@ router.post('/2fa/desactiver', authenticate, [body('code').notEmpty()], async (r
     if (!resultat.valid) return res.status(400).json({ message: 'Code incorrect.' });
 
     await pool.query('UPDATE users SET two_fa_enabled = 0, two_fa_secret = NULL WHERE id = ?', [req.user.id]);
-    res.json({ message: 'Double authentification desactivee.' });
+    res.json({ message: 'Double authentification désactivée.' });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur lors de la desactivation de la double authentification." });
+    res.status(500).json({ message: "Erreur lors de la désactivation de la double authentification." });
   }
 });
 

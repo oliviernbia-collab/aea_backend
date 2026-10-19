@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const pool = require('../config/db');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
+const { ROLES } = require('../config/permissions');
 const { makeUploader } = require('../middleware/upload');
 const { logAudit } = require('../utils/audit');
 const { notifyUser, broadcast } = require('../utils/notify');
@@ -14,7 +15,7 @@ const router = express.Router();
 const uploadPhoto = makeUploader('photos');
 
 const SAFE_FIELDS = `id, numero_membre, nom, prenom, email, telephone, photo, filiere, niveau, promotion, role, statut, created_at`;
-const ROLES_AUTORISES = ['membre', 'tresorier', 'secretaire_general', 'resp_communication', 'president', 'super_admin'];
+const ROLES_AUTORISES = ROLES;
 const STATUTS_AUTORISES = ['actif', 'inactif', 'suspendu', 'honoraire'];
 
 function genererMotDePasseTemporaire() {
@@ -72,7 +73,7 @@ router.get('/en-attente', authenticate, requirePermission('membres.voir_en_atten
 router.post('/', authenticate, requirePermission('membres.creer'), async (req, res) => {
   const { nom, prenom, email, telephone, password, filiere, niveau, promotion, role, statut } = req.body;
   if (!nom || !prenom || !email || !telephone) {
-    return res.status(400).json({ message: 'Nom, prenom, e-mail et telephone sont requis.' });
+    return res.status(400).json({ message: 'Nom, prénom, e-mail et téléphone sont requis.' });
   }
 
   const finalRole = ROLES_AUTORISES.includes(role) ? role : 'membre';
@@ -81,7 +82,7 @@ router.post('/', authenticate, requirePermission('membres.creer'), async (req, r
   try {
     const [existing] = await pool.query('SELECT id FROM users WHERE email = ? OR telephone = ?', [email, telephone]);
     if (existing.length) {
-      return res.status(409).json({ message: 'Un compte existe deja avec cet e-mail ou ce telephone.' });
+      return res.status(409).json({ message: 'Un compte existe déjà avec cet e-mail ou ce téléphone.' });
     }
 
     const numeroMembre = await genererNumeroMembre();
@@ -108,14 +109,14 @@ router.post('/', authenticate, requirePermission('membres.creer'), async (req, r
 
     broadcast('membres:update');
     res.status(201).json({
-      message: 'Membre cree avec succes.',
+      message: 'Membre créé avec succès.',
       id: result.insertId,
       numeroMembre,
       motDePasseInitial,
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Erreur lors de la creation du membre.' });
+    res.status(500).json({ message: 'Erreur lors de la création du membre.' });
   }
 });
 
@@ -157,32 +158,31 @@ router.patch('/:id/statut', authenticate, requirePermission('membres.changer_sta
     await assurerLigneCotisation(req.params.id, new Date().getFullYear(), MOIS_ADHESION);
     await notifyUser(req.params.id, {
       type: 'compte_valide',
-      titre: 'Votre inscription a ete validee',
-      contenu: 'Vous pouvez desormais vous connecter a votre espace membre AEA.',
+      titre: 'Votre inscription a été validée',
+      contenu: 'Vous pouvez désormais vous connecter à votre espace membre AEA.',
     });
   }
 
   broadcast('membres:update');
-  res.json({ message: 'Statut mis a jour.' });
+  res.json({ message: 'Statut mis à jour.' });
 });
 
 // PATCH /api/membres/:id/role -- gestion des roles (bureau)
 router.patch('/:id/role', authenticate, requirePermission('membres.changer_role'), async (req, res) => {
   const { role } = req.body;
-  const allowed = ['membre', 'tresorier', 'secretaire_general', 'resp_communication', 'president', 'super_admin'];
-  if (!allowed.includes(role)) return res.status(400).json({ message: 'Role invalide.' });
+  if (!ROLES.includes(role)) return res.status(400).json({ message: 'Rôle invalide.' });
 
   await pool.query('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id]);
   await logAudit({ tableName: 'users', recordId: req.params.id, userId: req.user.id, action: 'modification', nouvelleValeur: { role } });
   broadcast('membres:update');
-  res.json({ message: 'Role mis a jour.' });
+  res.json({ message: 'Rôle mis à jour.' });
 });
 
 // PUT /api/membres/:id -- MEM-03 mise a jour de sa propre fiche
 router.put('/:id', authenticate, uploadPhoto.single('photo'), async (req, res) => {
   const isSelf = Number(req.params.id) === req.user.id;
   const isBureau = ['super_admin', 'secretaire_general'].includes(req.user.role);
-  if (!isSelf && !isBureau) return res.status(403).json({ message: 'Action non autorisee.' });
+  if (!isSelf && !isBureau) return res.status(403).json({ message: 'Action non autorisée.' });
 
   const { nom, prenom, filiere, niveau, promotion, email, telephone } = req.body;
   const fields = [];
@@ -198,12 +198,12 @@ router.put('/:id', authenticate, uploadPhoto.single('photo'), async (req, res) =
     fields.push('photo = ?');
     params.push(req.file.path);
   }
-  if (!fields.length) return res.status(400).json({ message: 'Aucune donnee a mettre a jour.' });
+  if (!fields.length) return res.status(400).json({ message: 'Aucune donnée à mettre à jour.' });
 
   params.push(req.params.id);
   await pool.query(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, params);
   broadcast('membres:update');
-  res.json({ message: 'Fiche membre mise a jour.' });
+  res.json({ message: 'Fiche membre mise à jour.' });
 });
 
 // DELETE /api/membres/:id -- droit RGPD-like (loi CI 2013-450) : suppression sur demande
@@ -215,7 +215,7 @@ router.delete('/:id', authenticate, requirePermission('membres.supprimer'), asyn
   );
   await logAudit({ tableName: 'users', recordId: req.params.id, userId: req.user.id, action: 'modification', nouvelleValeur: { anonymise: true } });
   broadcast('membres:update');
-  res.json({ message: 'Donnees personnelles anonymisees. Historique financier conserve anonymise.' });
+  res.json({ message: 'Données personnelles anonymisées. Historique financier conservé anonymisé.' });
 });
 
 module.exports = router;

@@ -45,7 +45,7 @@ function makeUploader(subfolder) {
     limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
       if (!ALLOWED_MIME.has(file.mimetype)) {
-        return cb(new Error('Type de fichier non autorise (image, PDF ou video uniquement).'));
+        return cb(new Error('Type de fichier non autorisé (image, PDF ou vidéo uniquement).'));
       }
       cb(null, true);
     },

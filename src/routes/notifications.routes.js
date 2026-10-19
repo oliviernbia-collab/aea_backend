@@ -23,19 +23,19 @@ router.get('/non-lues', authenticate, async (req, res) => {
 // PATCH /api/notifications/:id/lu
 router.patch('/:id/lu', authenticate, async (req, res) => {
   await pool.query('UPDATE notifications SET lu = 1 WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-  res.json({ message: 'Notification marquee comme lue.' });
+  res.json({ message: 'Notification marquée comme lue.' });
 });
 
 // PATCH /api/notifications/tout-lire
 router.patch('/tout-lire', authenticate, async (req, res) => {
   await pool.query('UPDATE notifications SET lu = 1 WHERE user_id = ?', [req.user.id]);
-  res.json({ message: 'Toutes les notifications sont marquees comme lues.' });
+  res.json({ message: 'Toutes les notifications sont marquées comme lues.' });
 });
 
 // PUT /api/notifications/preferences -- NOT-05
 router.put('/preferences', authenticate, async (req, res) => {
   await pool.query('UPDATE users SET notif_preferences = ? WHERE id = ?', [JSON.stringify(req.body), req.user.id]);
-  res.json({ message: 'Preferences mises a jour.' });
+  res.json({ message: 'Préférences mises à jour.' });
 });
 
 module.exports = router;

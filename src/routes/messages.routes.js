@@ -112,15 +112,15 @@ router.post(
 // PATCH /api/messages/:id/lu -- MSG-06 indicateur de lecture
 router.patch('/:id/lu', authenticate, async (req, res) => {
   await pool.query('INSERT IGNORE INTO message_reads (message_id, user_id) VALUES (?, ?)', [req.params.id, req.user.id]);
-  res.json({ message: 'Marque comme lu.' });
+  res.json({ message: 'Marqué comme lu.' });
 });
 
 // POST /api/messages/:id/signaler -- MSG-07 signalement / moderation
 router.post('/:id/signaler', authenticate, async (req, res) => {
   await pool.query('UPDATE messages SET signale = 1 WHERE id = ?', [req.params.id]);
   const [bureau] = await pool.query(`SELECT id FROM users WHERE role IN ('president','secretaire_general','super_admin') AND statut = 'actif'`);
-  await notifyUsers(bureau.map((b) => b.id), { type: 'message_signale', titre: 'Message signale', lien: `/messagerie/moderation` });
-  res.json({ message: 'Message signale au bureau.' });
+  await notifyUsers(bureau.map((b) => b.id), { type: 'message_signale', titre: 'Message signalé', lien: `/messagerie/moderation` });
+  res.json({ message: 'Message signalé au bureau.' });
 });
 
 module.exports = { router, setIo };
