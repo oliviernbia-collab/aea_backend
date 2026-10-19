@@ -2,3 +2,8 @@ node_modules/
 .env
 uploads/
 *.log
+
+# Build du frontend, publie ici par le workflow de deploiement du depot aea_frontend
+# (rsync vers ce dossier) : jamais versionne cote backend, sinon `git reset --hard`
+# l'effacerait a chaque deploiement backend.
+public/

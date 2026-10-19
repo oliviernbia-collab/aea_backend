@@ -1,0 +1,36 @@
+name: Déploiement backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Déployer sur le serveur via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script_stop: true
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Active l'environnement Node géré par cPanel (Setup Node.js App) avant npm/node.
+            # Copiez la ligne EXACTE "source .../bin/activate" affichée en haut de la page
+            # "Setup Node.js App" dans cPanel pour cette application, et collez-la ici à la
+            # place de la ligne ci-dessous (DEPLOY_NODE_ENV = ce chemin, en secret GitHub).
+            source ${{ secrets.DEPLOY_NODE_ENV }}
+
+            npm ci --omit=dev
+
+            # Convention Passenger (utilisée par "Setup Node.js App") : toucher ce fichier
+            # suffit à redémarrer l'application sans interrompre les requêtes en cours.
+            mkdir -p tmp
+            touch tmp/restart.txt
