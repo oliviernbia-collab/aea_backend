@@ -9,28 +9,40 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Déployer sur le serveur via SSH
-        uses: appleboy/ssh-action@v1.2.0
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          port: ${{ secrets.DEPLOY_PORT }}
+          node-version: 22
+          cache: npm
+
+      # node_modules est construit ici (CI) et envoyé tel quel par FTP : le serveur n'a pas
+      # d'accès shell (SSH/SFTP fermé côté hébergeur), donc "npm install" ne peut pas tourner
+      # sur place. Les dépendances de ce projet sont en JS pur (pas de module natif type
+      # "bcrypt" compilé - voir bcryptjs dans package.json), donc aucun souci de compatibilité
+      # binaire entre ce runner Linux et le serveur.
+      - run: npm ci --omit=dev
+
+      # Convention Passenger (utilisée par "Setup Node.js App" de cPanel) : la présence/mise à
+      # jour de ce fichier déclenche un redémarrage de l'appli sans coupure de service. Comme on
+      # ne peut pas faire `touch` à distance, on envoie un fichier neuf à chaque déploiement.
+      - run: mkdir -p tmp && date > tmp/restart.txt
+
+      - name: Publier par FTPS
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script_stop: true
-          script: |
-            cd ${{ secrets.DEPLOY_PATH }}
-            git fetch origin main
-            git reset --hard origin/main
-
-            # Active l'environnement Node géré par cPanel (Setup Node.js App) avant npm/node.
-            # Copiez la ligne EXACTE "source .../bin/activate" affichée en haut de la page
-            # "Setup Node.js App" dans cPanel pour cette application, et collez-la ici à la
-            # place de la ligne ci-dessous (DEPLOY_NODE_ENV = ce chemin, en secret GitHub).
-            source ${{ secrets.DEPLOY_NODE_ENV }}
-
-            npm ci --omit=dev
-
-            # Convention Passenger (utilisée par "Setup Node.js App") : toucher ce fichier
-            # suffit à redémarrer l'application sans interrompre les requêtes en cours.
-            mkdir -p tmp
-            touch tmp/restart.txt
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          protocol: ftps
+          port: 21
+          local-dir: ./
+          server-dir: ${{ secrets.DEPLOY_PATH }}/
+          exclude: |
+            **/.git*
+            **/.git/**
+            **/.github/**
+            **/.env
+            **/uploads/**
+            **/public/**
+            **/node_modules/.cache/**
