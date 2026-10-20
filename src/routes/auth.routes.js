@@ -132,22 +132,33 @@ router.get('/moi', authenticate, async (req, res) => {
   res.json(publicUser(rows[0]));
 });
 
+// Genere un mot de passe temporaire lisible (ex: "K7B4-PQXZ")
+function genererMotDePasseTemporaire() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sans caracteres ambigus (0/O, 1/I/L)
+  const bloc = () =>
+    Array.from({ length: 4 }, () => alphabet[crypto.randomInt(alphabet.length)]).join('');
+  return `${bloc()}-${bloc()}`;
+}
+
 // POST /api/auth/mot-de-passe-oublie -- MEM-02 recuperation
+// Pas de fournisseur SMS/e-mail branche : on genere un mot de passe temporaire,
+// on l'enregistre directement sur le compte et on le renvoie dans la reponse
+// pour affichage immediat a l'ecran (le membre pourra le changer une fois connecte).
 router.post('/mot-de-passe-oublie', [body('identifiant').notEmpty()], async (req, res) => {
   const { identifiant } = req.body;
   const [rows] = await pool.query('SELECT id FROM users WHERE email = ? OR telephone = ?', [identifiant, identifiant]);
-  if (rows.length) {
-    const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-    await pool.query('INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)', [
-      rows[0].id,
-      token,
-      expiresAt,
-    ]);
-    // NOTE: envoi reel par SMS/e-mail a brancher sur un fournisseur (voir NOT-04, 5.1)
-    console.log(`[reset-password] token pour user ${rows[0].id}: ${token}`);
+  if (!rows.length) {
+    return res.status(404).json({ message: 'Aucun compte ne correspond à cet e-mail ou numéro de téléphone.' });
   }
-  res.json({ message: 'Si ce compte existe, des instructions ont été envoyées.' });
+
+  const motDePasseTemporaire = genererMotDePasseTemporaire();
+  const passwordHash = await bcrypt.hash(motDePasseTemporaire, 10);
+  await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, rows[0].id]);
+
+  res.json({
+    message: 'Un nouveau mot de passe a été généré pour votre compte.',
+    motDePasseTemporaire,
+  });
 });
 
 // PUT /api/auth/mot-de-passe -- changement de mot de passe par le membre connecte
