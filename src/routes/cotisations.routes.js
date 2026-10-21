@@ -209,7 +209,7 @@ router.post('/paiements', authenticate, requirePermission('cotisations.saisir_pa
 // POST /api/cotisations/declarations -- COT-09 declaration Mobile Money par le membre, a valider
 router.post('/declarations', authenticate, uploadPreuve.single('preuve'), async (req, res) => {
   const { montant, date_paiement, mode_paiement, mois_couverts } = req.body;
-  const moisArray = JSON.parse(mois_couverts || '[]');
+  const moisArray = Array.isArray(mois_couverts) ? mois_couverts : [];
   if (!req.file) return res.status(400).json({ message: 'Capture d\'écran de la preuve de paiement requise.' });
 
   const [result] = await pool.query(

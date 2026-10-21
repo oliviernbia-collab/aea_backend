@@ -37,7 +37,9 @@ app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') || '*', credentials: 
 // Doit rester avant express.json() : la signature HMAC du webhook Jeko porte sur le corps brut.
 monterWebhookJeko(app);
 
-app.use(express.json());
+// Limite relevee : les fichiers (image/PDF/video, jusqu'a 20 Mo) voyagent en base64 dans
+// le JSON plutot qu'en multipart/form-data, bloque par le WAF de l'hebergeur (voir upload.js).
+app.use(express.json({ limit: '30mb' }));
 app.use(morgan('dev'));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use('/api', apiLimiter);
