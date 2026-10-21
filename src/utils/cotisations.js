@@ -52,4 +52,48 @@ async function assurerLigneCotisation(membreId, annee, mois) {
   return { id: result.insertId, membre_id: membreId, annee, mois, montant_du: montantDu, montant_paye: 0 };
 }
 
-module.exports = { MOIS_ADHESION, ROLES_BUREAU, FRAIS_PLATEFORME_FCFA, statutDe, montantDuPour, assurerLigneCotisation };
+// Cree, pour UN membre, les 12 lignes de cotisation mensuelle + la ligne de droit d'adhesion
+// d'une annee donnee, selon le bareme en vigueur (cotisations_config). Meme logique que la
+// boucle de POST /cotisations/config, mais appliquee a un seul membre (ex. a son activation) :
+// sans ca, un membre active entre deux configurations n'a de ligne que pour les mois ou il a
+// explicitement tente un paiement (assurerLigneCotisation est lazy), et les mois jamais "crees"
+// n'apparaissent pas du tout dans le tableau de recouvrement -> il semble "a jour" a tort.
+// Ne fait rien si aucun bareme n'a encore ete configure pour cette annee (rien a initialiser).
+async function assurerLignesAnnee(membreId, annee) {
+  const [config] = await pool.query('SELECT * FROM cotisations_config WHERE annee = ?', [annee]);
+  if (!config.length) return;
+  const { montant_membre, montant_bureau, montant_adhesion } = config[0];
+
+  const [[membre]] = await pool.query('SELECT role FROM users WHERE id = ?', [membreId]);
+  if (!membre) return;
+  const montantMensuel = ROLES_BUREAU.includes(membre.role) ? montant_bureau : montant_membre;
+
+  for (let mois = 1; mois <= 12; mois += 1) {
+    await pool.query(
+      `INSERT INTO cotisations (membre_id, annee, mois, montant_du, montant_paye, statut)
+       VALUES (?, ?, ?, ?, 0, ?)
+       ON DUPLICATE KEY UPDATE
+         montant_du = IF(montant_paye = 0, VALUES(montant_du), montant_du),
+         statut = IF(montant_paye = 0, VALUES(statut), statut)`,
+      [membreId, annee, mois, montantMensuel, montantMensuel > 0 ? 'non_paye' : 'non_du']
+    );
+  }
+  await pool.query(
+    `INSERT INTO cotisations (membre_id, annee, mois, montant_du, montant_paye, statut)
+     VALUES (?, ?, ?, ?, 0, ?)
+     ON DUPLICATE KEY UPDATE
+       montant_du = IF(montant_paye = 0, VALUES(montant_du), montant_du),
+       statut = IF(montant_paye = 0, VALUES(statut), statut)`,
+    [membreId, annee, MOIS_ADHESION, montant_adhesion, montant_adhesion > 0 ? 'non_paye' : 'non_du']
+  );
+}
+
+module.exports = {
+  MOIS_ADHESION,
+  ROLES_BUREAU,
+  FRAIS_PLATEFORME_FCFA,
+  statutDe,
+  montantDuPour,
+  assurerLigneCotisation,
+  assurerLignesAnnee,
+};

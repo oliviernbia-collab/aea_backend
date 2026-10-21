@@ -4,7 +4,7 @@ const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { makeUploader } = require('../middleware/upload');
 const { notifyUser, broadcast } = require('../utils/notify');
-const { MOIS_ADHESION, ROLES_BUREAU, FRAIS_PLATEFORME_FCFA, assurerLigneCotisation } = require('../utils/cotisations');
+const { MOIS_ADHESION, FRAIS_PLATEFORME_FCFA, assurerLigneCotisation, assurerLignesAnnee } = require('../utils/cotisations');
 const { enregistrerEntreeCaisse, libellePaiement, appliquerPaiementAuxCotisations, finaliserPaiementEnLigne } = require('../services/cotisationsPaiements');
 const jeko = require('../services/jeko');
 
@@ -39,27 +39,9 @@ router.post('/config', authenticate, requirePermission('cotisations.configurer')
   // pour chaque membre actif qui n'en a pas encore pour cette annee, ET met a jour le montant du
   // des lignes pas encore payees (montant_paye = 0) pour que le nouveau bareme s'applique tout de
   // suite. Une ligne deja (partiellement) payee n'est jamais modifiee retroactivement.
-  const [membres] = await pool.query(`SELECT id, role FROM users WHERE statut = 'actif'`);
+  const [membres] = await pool.query(`SELECT id FROM users WHERE statut = 'actif'`);
   for (const m of membres) {
-    const montantMensuel = ROLES_BUREAU.includes(m.role) ? montant_bureau : montant_membre;
-    for (let mois = 1; mois <= 12; mois += 1) {
-      await pool.query(
-        `INSERT INTO cotisations (membre_id, annee, mois, montant_du, montant_paye, statut)
-         VALUES (?, ?, ?, ?, 0, ?)
-         ON DUPLICATE KEY UPDATE
-           montant_du = IF(montant_paye = 0, VALUES(montant_du), montant_du),
-           statut = IF(montant_paye = 0, VALUES(statut), statut)`,
-        [m.id, annee, mois, montantMensuel, montantMensuel > 0 ? 'non_paye' : 'non_du']
-      );
-    }
-    await pool.query(
-      `INSERT INTO cotisations (membre_id, annee, mois, montant_du, montant_paye, statut)
-       VALUES (?, ?, ?, ?, 0, ?)
-       ON DUPLICATE KEY UPDATE
-         montant_du = IF(montant_paye = 0, VALUES(montant_du), montant_du),
-         statut = IF(montant_paye = 0, VALUES(statut), statut)`,
-      [m.id, annee, MOIS_ADHESION, montant_adhesion, montant_adhesion > 0 ? 'non_paye' : 'non_du']
-    );
+    await assurerLignesAnnee(m.id, annee);
   }
 
   broadcast('cotisations:update');
@@ -85,6 +67,13 @@ router.get('/tableau', authenticate, async (req, res) => {
     params
   );
 
+  // Un mois qui n'est pas encore arrive ne peut pas etre "en retard" : les lignes de cotisation
+  // de l'annee en cours sont creees a l'avance (voir assurerLignesAnnee), donc un mois futur est
+  // deja en base avec statut 'non_paye' sans que ce soit une vraie echeance manquee.
+  const anneeCourante = new Date().getFullYear();
+  const moisCourant = new Date().getMonth() + 1;
+  const dernierMoisEchu = Number(annee) < anneeCourante ? 12 : Number(annee) === anneeCourante ? moisCourant : 0;
+
   const membres = {};
   for (const r of rows) {
     if (!membres[r.membre_id]) {
@@ -102,10 +91,15 @@ router.get('/tableau', authenticate, async (req, res) => {
       };
     }
     if (r.mois) {
-      membres[r.membre_id].mois[r.mois] = { statut: r.statut, montant_du: r.montant_du, montant_paye: r.montant_paye };
+      // Un mois futur non encore paye est affiche "non dû" plutôt que "non payé" (rouge) :
+      // l'echeance n'est pas encore passee, ce n'est pas un impaye.
+      const statutAffiche = r.mois > dernierMoisEchu && r.statut === 'non_paye' ? 'non_du' : r.statut;
+      membres[r.membre_id].mois[r.mois] = { statut: statutAffiche, montant_du: r.montant_du, montant_paye: r.montant_paye };
       membres[r.membre_id].totalPaye += Number(r.montant_paye || 0);
       membres[r.membre_id].totalDu += Number(r.montant_du || 0);
-      if (r.statut === 'non_paye' || r.statut === 'partiel') membres[r.membre_id].moisEnRetard += 1;
+      if (r.mois <= dernierMoisEchu && (r.statut === 'non_paye' || r.statut === 'partiel')) {
+        membres[r.membre_id].moisEnRetard += 1;
+      }
     }
   }
 

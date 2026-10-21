@@ -9,7 +9,7 @@ const { makeUploader } = require('../middleware/upload');
 const { logAudit } = require('../utils/audit');
 const { notifyUser, broadcast } = require('../utils/notify');
 const { genererNumeroMembre } = require('../utils/numeroMembre');
-const { MOIS_ADHESION, assurerLigneCotisation } = require('../utils/cotisations');
+const { assurerLignesAnnee } = require('../utils/cotisations');
 
 const router = express.Router();
 const uploadPhoto = makeUploader('photos');
@@ -104,7 +104,7 @@ router.post('/', authenticate, requirePermission('membres.creer'), async (req, r
     });
 
     if (finalStatut === 'actif') {
-      await assurerLigneCotisation(result.insertId, new Date().getFullYear(), MOIS_ADHESION);
+      await assurerLignesAnnee(result.insertId, new Date().getFullYear());
     }
 
     broadcast('membres:update');
@@ -155,7 +155,7 @@ router.patch('/:id/statut', authenticate, requirePermission('membres.changer_sta
   });
 
   if (ancien === 'en_attente' && statut === 'actif') {
-    await assurerLigneCotisation(req.params.id, new Date().getFullYear(), MOIS_ADHESION);
+    await assurerLignesAnnee(req.params.id, new Date().getFullYear());
     await notifyUser(req.params.id, {
       type: 'compte_valide',
       titre: 'Votre inscription a été validée',
