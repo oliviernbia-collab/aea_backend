@@ -68,11 +68,11 @@ router.post('/config', authenticate, requirePermission('cotisations.configurer')
 
 // GET /api/cotisations/tableau -- COT-02, COT-03 (membres x mois avec filtres)
 router.get('/tableau', authenticate, async (req, res) => {
-  const { annee = new Date().getFullYear(), promotion, filiere, statut } = req.query;
+  const { annee = new Date().getFullYear(), role, filiere, statut } = req.query;
 
   const conditions = ["u.statut = 'actif'"];
   const params = [annee];
-  if (promotion) { conditions.push('u.promotion = ?'); params.push(promotion); }
+  if (role) { conditions.push('u.role = ?'); params.push(role); }
   if (filiere) { conditions.push('u.filiere = ?'); params.push(filiere); }
 
   const [rows] = await pool.query(
