@@ -4,11 +4,13 @@ const { notifyUser, broadcast } = require('../utils/notify');
 const { MOIS_ADHESION, statutDe, assurerLigneCotisation } = require('../utils/cotisations');
 
 // Fait entrer un paiement de cotisation valide dans la caisse de l'association (transparence financiere, section 2 du CDC)
-async function enregistrerEntreeCaisse({ membreId, montant, dateOperation, saisiPar, libelle, categorie = 'Cotisation' }) {
+// paiementId (optionnel) relie l'ecriture de caisse au paiement d'origine (table paiements),
+// pour qu'une annulation de paiement (voir annulerPaiement) retrouve et neutralise cette ecriture.
+async function enregistrerEntreeCaisse({ membreId, montant, dateOperation, saisiPar, libelle, categorie = 'Cotisation', paiementId = null }) {
   const [result] = await pool.query(
-    `INSERT INTO caisse_operations (type, fonds, categorie, libelle, montant, date_operation, saisi_par, statut)
-     VALUES ('entree', 'fonctionnement', ?, ?, ?, ?, ?, 'validee')`,
-    [categorie, libelle, montant, dateOperation, saisiPar]
+    `INSERT INTO caisse_operations (type, fonds, categorie, libelle, montant, date_operation, saisi_par, statut, paiement_id)
+     VALUES ('entree', 'fonctionnement', ?, ?, ?, ?, ?, 'validee', ?)`,
+    [categorie, libelle, montant, dateOperation, saisiPar, paiementId]
   );
   await logAudit({
     tableName: 'caisse_operations',
@@ -79,6 +81,7 @@ async function finaliserPaiementEnLigne(id, transactionJeko) {
       dateOperation: aujourdhui,
       saisiPar: ligne.membre_id,
       libelle: libellePaiement(membre, moisCouverts, `paiement en ligne ${ligne.payment_method}`),
+      paiementId: resultPaiement.insertId,
     });
 
     // Le payeur a debourse montant_charge (montant du + frais de transaction, voir FRAIS_PLATEFORME_FCFA) :
@@ -93,6 +96,7 @@ async function finaliserPaiementEnLigne(id, transactionJeko) {
         saisiPar: ligne.membre_id,
         libelle: `Frais de transaction en ligne (compense la commission Jeko) - ${membre.prenom} ${membre.nom}`,
         categorie: 'Frais de transaction',
+        paiementId: resultPaiement.insertId,
       });
     }
 
@@ -112,9 +116,65 @@ async function finaliserPaiementEnLigne(id, transactionJeko) {
   }
 }
 
+// Annule un paiement (saisie manuelle, declaration validee ou paiement en ligne) : le paiement
+// et l'ecriture de caisse qu'il a generee sont marques 'annulee' (jamais supprimes, pour garder
+// une trace), puis les lignes de cotisation des annees concernees sont recalculees depuis zero
+// en rejouant tous les AUTRES paiements valides du membre -- fiable meme si plusieurs paiements
+// se chevauchent sur les memes mois (contrairement a une simple soustraction du montant annule).
+async function annulerPaiement(paiementId, annulePar) {
+  const [[paiement]] = await pool.query('SELECT * FROM paiements WHERE id = ?', [paiementId]);
+  if (!paiement) {
+    const err = new Error('Paiement introuvable.');
+    err.status = 404;
+    throw err;
+  }
+  if (paiement.statut_validation === 'annulee') {
+    const err = new Error('Ce paiement est déjà annulé.');
+    err.status = 400;
+    throw err;
+  }
+
+  const moisCouverts = typeof paiement.mois_couverts === 'string' ? JSON.parse(paiement.mois_couverts) : paiement.mois_couverts;
+  const annees = [...new Set(moisCouverts.map((m) => m.annee))];
+
+  await pool.query(`UPDATE paiements SET statut_validation = 'annulee' WHERE id = ?`, [paiementId]);
+  await pool.query(`UPDATE caisse_operations SET statut = 'annulee' WHERE paiement_id = ? AND statut != 'annulee'`, [paiementId]);
+
+  const [autresPaiements] = await pool.query(
+    `SELECT * FROM paiements WHERE membre_id = ? AND statut_validation = 'valide' AND id != ? ORDER BY date_paiement ASC, id ASC`,
+    [paiement.membre_id, paiementId]
+  );
+
+  for (const annee of annees) {
+    await pool.query(
+      `UPDATE cotisations SET montant_paye = 0, statut = IF(montant_du > 0, 'non_paye', 'non_du')
+       WHERE membre_id = ? AND annee = ?`,
+      [paiement.membre_id, annee]
+    );
+
+    for (const p of autresPaiements) {
+      const mc = typeof p.mois_couverts === 'string' ? JSON.parse(p.mois_couverts) : p.mois_couverts;
+      const mcAnnee = mc.filter((m) => m.annee === annee);
+      if (mcAnnee.length) await appliquerPaiementAuxCotisations(paiement.membre_id, mcAnnee, p.montant);
+    }
+  }
+
+  await logAudit({
+    tableName: 'paiements',
+    recordId: paiementId,
+    userId: annulePar,
+    action: 'annulation',
+    ancienneValeur: { membre_id: paiement.membre_id, montant: paiement.montant, mois_couverts: moisCouverts },
+  });
+
+  broadcast('cotisations:update');
+  broadcast('caisse:update');
+}
+
 module.exports = {
   enregistrerEntreeCaisse,
   libellePaiement,
   appliquerPaiementAuxCotisations,
   finaliserPaiementEnLigne,
+  annulerPaiement,
 };

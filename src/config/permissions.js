@@ -82,6 +82,7 @@ const PERMISSIONS = [
   { key: 'cotisations.voir_adhesions', module: 'Cotisations', label: "Voir les droits d'adhésion de tous les membres" },
   { key: 'cotisations.saisir_paiement', module: 'Cotisations', label: 'Saisir un paiement' },
   { key: 'cotisations.valider_declaration', module: 'Cotisations', label: 'Valider une déclaration Mobile Money' },
+  { key: 'cotisations.annuler_paiement', module: 'Cotisations', label: 'Annuler un paiement de cotisation (recalcule la caisse)' },
 
   { key: 'caisse.saisir_operation', module: 'Caisse', label: 'Saisir une opération de caisse' },
   { key: 'caisse.valider_operation', module: 'Caisse', label: 'Valider une opération (double validation)' },

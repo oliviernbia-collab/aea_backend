@@ -5,7 +5,7 @@ const { requirePermission } = require('../middleware/permissions');
 const { makeUploader } = require('../middleware/upload');
 const { notifyUser, broadcast } = require('../utils/notify');
 const { MOIS_ADHESION, FRAIS_PLATEFORME_FCFA, assurerLigneCotisation, assurerLignesAnnee } = require('../utils/cotisations');
-const { enregistrerEntreeCaisse, libellePaiement, appliquerPaiementAuxCotisations, finaliserPaiementEnLigne } = require('../services/cotisationsPaiements');
+const { enregistrerEntreeCaisse, libellePaiement, appliquerPaiementAuxCotisations, finaliserPaiementEnLigne, annulerPaiement } = require('../services/cotisationsPaiements');
 const jeko = require('../services/jeko');
 
 const router = express.Router();
@@ -184,6 +184,7 @@ router.post('/paiements', authenticate, requirePermission('cotisations.saisir_pa
     dateOperation: date_paiement,
     saisiPar: req.user.id,
     libelle: libellePaiement(membre, mois_couverts, recuNumero),
+    paiementId: result.insertId,
   });
 
   await appliquerPaiementAuxCotisations(membre_id, mois_couverts, montant);
@@ -246,6 +247,7 @@ router.patch('/declarations/:id/valider', authenticate, requirePermission('cotis
     dateOperation: paiement.date_paiement,
     saisiPar: req.user.id,
     libelle: libellePaiement(membre, moisCouverts, 'declaration Mobile Money validee'),
+    paiementId: paiement.id,
   });
 
   await notifyUser(paiement.membre_id, {
@@ -256,6 +258,26 @@ router.patch('/declarations/:id/valider', authenticate, requirePermission('cotis
   broadcast('cotisations:update');
   broadcast('caisse:update');
   res.json({ message: 'Déclaration validée et cotisations mises à jour.' });
+});
+
+// GET /api/cotisations/membres/:id/paiements -- historique des paiements d'un membre (pour corriger une saisie erronee)
+router.get('/membres/:id/paiements', authenticate, requirePermission('cotisations.saisir_paiement'), async (req, res) => {
+  const [rows] = await pool.query(
+    `SELECT id, montant, date_paiement, mode_paiement, mois_couverts, recu_numero, statut_validation, created_at
+     FROM paiements WHERE membre_id = ? ORDER BY date_paiement DESC, id DESC`,
+    [req.params.id]
+  );
+  res.json(rows);
+});
+
+// DELETE /api/cotisations/paiements/:id -- annule un paiement mal saisi (reservee par defaut au super admin)
+router.delete('/paiements/:id', authenticate, requirePermission('cotisations.annuler_paiement'), async (req, res) => {
+  try {
+    await annulerPaiement(req.params.id, req.user.id);
+    res.json({ message: 'Paiement annulé, cotisations et caisse mises à jour.' });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message || 'Erreur lors de l\'annulation du paiement.' });
+  }
 });
 
 // POST /api/cotisations/paiement-en-ligne -- debit direct du compte Mobile Money du membre via Jeko (API direct)
