@@ -31,38 +31,34 @@ function libellePaiement(membre, moisCouverts, suffixe) {
   return `${nature} - ${membre.prenom} ${membre.nom} (${suffixe})`;
 }
 
-async function affecterLigne(membreId, annee, mois, montant) {
-  const c = await assurerLigneCotisation(membreId, annee, mois);
-  const aPayer = Math.max(0, Number(c.montant_du) - Number(c.montant_paye));
-  const affecte = Math.min(montant, aPayer);
-  const nouveauPaye = Number(c.montant_paye) + affecte;
-  await pool.query('UPDATE cotisations SET montant_paye = ?, statut = ? WHERE id = ?', [
-    nouveauPaye,
-    statutDe(Number(c.montant_du), nouveauPaye),
-    c.id,
-  ]);
-  return affecte;
+// Somme des montants restant dus sur une liste de mois (cree les lignes manquantes au passage).
+// A verifier AVANT d'appliquer un paiement : appliquerPaiementAuxCotisations n'affecte un
+// paiement qu'aux lignes fournies dans moisCouverts, sans jamais deborder sur un autre mois --
+// un montant superieur a ce qui est du sur les mois choisis doit donc etre rejete en amont
+// (voir les routes), plutot que de laisser le surplus disparaitre du suivi des cotisations.
+async function totalRestantDu(membreId, moisCouverts) {
+  let total = 0;
+  for (const { annee, mois } of moisCouverts) {
+    const c = await assurerLigneCotisation(membreId, annee, mois);
+    total += Math.max(0, Number(c.montant_du) - Number(c.montant_paye));
+  }
+  return total;
 }
 
-// Repartit un montant paye sur les lignes de cotisation couvertes, dans l'ordre fourni, PUIS
-// reporte tout reliquat sur les mois suivants non encore soldes de la meme annee (dans l'ordre
-// chronologique, hors droit d'adhesion). Sans ce report, un montant superieur a ce qui est du
-// sur les mois explicitement choisis faisait disparaitre la difference du suivi des cotisations :
-// l'argent entrait bien integralement en caisse, mais plus aucune ligne n'en gardait trace.
+// Repartit un montant paye sur les lignes de cotisation couvertes, dans l'ordre fourni.
 async function appliquerPaiementAuxCotisations(membreId, moisCouverts, montant) {
   let reste = Number(montant);
-  const moisDejaCouverts = new Set();
-  let derniereAnnee = null;
-
   for (const { annee, mois } of moisCouverts) {
-    derniereAnnee = annee;
-    moisDejaCouverts.add(mois);
-    reste -= await affecterLigne(membreId, annee, mois, reste);
-  }
-
-  for (let mois = 1; mois <= 12 && reste > 0 && derniereAnnee !== null; mois += 1) {
-    if (moisDejaCouverts.has(mois)) continue;
-    reste -= await affecterLigne(membreId, derniereAnnee, mois, reste);
+    const c = await assurerLigneCotisation(membreId, annee, mois);
+    const aPayer = Math.max(0, Number(c.montant_du) - Number(c.montant_paye));
+    const affecte = Math.min(reste, aPayer);
+    const nouveauPaye = Number(c.montant_paye) + affecte;
+    reste -= affecte;
+    await pool.query('UPDATE cotisations SET montant_paye = ?, statut = ? WHERE id = ?', [
+      nouveauPaye,
+      statutDe(Number(c.montant_du), nouveauPaye),
+      c.id,
+    ]);
   }
 }
 
@@ -192,6 +188,7 @@ async function annulerPaiement(paiementId, annulePar) {
 module.exports = {
   enregistrerEntreeCaisse,
   libellePaiement,
+  totalRestantDu,
   appliquerPaiementAuxCotisations,
   finaliserPaiementEnLigne,
   annulerPaiement,

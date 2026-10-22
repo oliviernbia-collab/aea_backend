@@ -5,7 +5,7 @@ const { requirePermission } = require('../middleware/permissions');
 const { makeUploader } = require('../middleware/upload');
 const { notifyUser, broadcast } = require('../utils/notify');
 const { MOIS_ADHESION, FRAIS_PLATEFORME_FCFA, assurerLigneCotisation, assurerLignesAnnee } = require('../utils/cotisations');
-const { enregistrerEntreeCaisse, libellePaiement, appliquerPaiementAuxCotisations, finaliserPaiementEnLigne, annulerPaiement } = require('../services/cotisationsPaiements');
+const { enregistrerEntreeCaisse, libellePaiement, totalRestantDu, appliquerPaiementAuxCotisations, finaliserPaiementEnLigne, annulerPaiement } = require('../services/cotisationsPaiements');
 const jeko = require('../services/jeko');
 
 const router = express.Router();
@@ -170,6 +170,13 @@ router.post('/paiements', authenticate, requirePermission('cotisations.saisir_pa
     return res.status(400).json({ message: 'Précisez au moins un mois couvert (ou le droit d\'adhésion).' });
   }
 
+  const restantDu = await totalRestantDu(membre_id, mois_couverts);
+  if (Number(montant) > restantDu) {
+    return res.status(400).json({
+      message: `Le montant (${montant} FCFA) dépasse ce qui est dû sur les mois sélectionnés (${restantDu} FCFA). Cochez un mois supplémentaire ou corrigez le montant.`,
+    });
+  }
+
   const recuNumero = `AEA-RECU-${Date.now()}`;
   const [result] = await pool.query(
     `INSERT INTO paiements (membre_id, montant, date_paiement, mode_paiement, mois_couverts, recu_numero, saisi_par, statut_validation)
@@ -206,6 +213,14 @@ router.post('/declarations', authenticate, uploadPreuve.single('preuve'), async 
   const { montant, date_paiement, mode_paiement, mois_couverts } = req.body;
   const moisArray = Array.isArray(mois_couverts) ? mois_couverts : [];
   if (!req.file) return res.status(400).json({ message: 'Capture d\'écran de la preuve de paiement requise.' });
+  if (!moisArray.length) return res.status(400).json({ message: 'Précisez au moins un mois couvert (ou le droit d\'adhésion).' });
+
+  const restantDu = await totalRestantDu(req.user.id, moisArray);
+  if (Number(montant) > restantDu) {
+    return res.status(400).json({
+      message: `Le montant (${montant} FCFA) dépasse ce qui est dû sur les mois sélectionnés (${restantDu} FCFA). Cochez un mois supplémentaire ou corrigez le montant.`,
+    });
+  }
 
   const [result] = await pool.query(
     `INSERT INTO paiements (membre_id, montant, date_paiement, mode_paiement, mois_couverts, preuve_capture, statut_validation, saisi_par)
@@ -236,6 +251,14 @@ router.patch('/declarations/:id/valider', authenticate, requirePermission('cotis
   if (paiement.statut_validation !== 'en_attente') return res.status(400).json({ message: 'Déjà traitée.' });
 
   const moisCouverts = typeof paiement.mois_couverts === 'string' ? JSON.parse(paiement.mois_couverts) : paiement.mois_couverts;
+
+  const restantDu = await totalRestantDu(paiement.membre_id, moisCouverts);
+  if (Number(paiement.montant) > restantDu) {
+    return res.status(400).json({
+      message: `Le montant déclaré (${paiement.montant} FCFA) dépasse ce qui est dû sur les mois concernés (${restantDu} FCFA). Contactez le membre pour corriger la déclaration.`,
+    });
+  }
+
   await appliquerPaiementAuxCotisations(paiement.membre_id, moisCouverts, paiement.montant);
 
   await pool.query("UPDATE paiements SET statut_validation = 'valide' WHERE id = ?", [req.params.id]);
