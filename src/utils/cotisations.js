@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { BUREAU_ROLES } = require('../config/permissions');
 
 // 0 = droit d'adhesion (paiement unique a l'entree dans l'association) ; 1-12 = cotisation mensuelle
 const MOIS_ADHESION = 0;
@@ -15,8 +16,6 @@ function statutDe(montantDu, montantPaye) {
   return 'paye';
 }
 
-const ROLES_BUREAU = ['tresorier', 'secretaire_general', 'resp_communication', 'president', 'super_admin'];
-
 // Montant du pour une ligne donnee : le droit d'adhesion est le meme pour tous, la cotisation
 // mensuelle depend du role (membre simple vs role du bureau), selon le bareme de l'annee.
 async function montantDuPour(membreId, annee, mois) {
@@ -30,7 +29,7 @@ async function montantDuPour(membreId, annee, mois) {
     annee,
   ]);
   if (!config.length) return 0;
-  const estBureau = membre && ROLES_BUREAU.includes(membre.role);
+  const estBureau = membre && BUREAU_ROLES.includes(membre.role);
   return Number(estBureau ? config[0].montant_bureau : config[0].montant_membre);
 }
 
@@ -66,7 +65,7 @@ async function assurerLignesAnnee(membreId, annee) {
 
   const [[membre]] = await pool.query('SELECT role FROM users WHERE id = ?', [membreId]);
   if (!membre) return;
-  const montantMensuel = ROLES_BUREAU.includes(membre.role) ? montant_bureau : montant_membre;
+  const montantMensuel = BUREAU_ROLES.includes(membre.role) ? montant_bureau : montant_membre;
 
   for (let mois = 1; mois <= 12; mois += 1) {
     await pool.query(
@@ -90,7 +89,6 @@ async function assurerLignesAnnee(membreId, annee) {
 
 module.exports = {
   MOIS_ADHESION,
-  ROLES_BUREAU,
   FRAIS_PLATEFORME_FCFA,
   statutDe,
   montantDuPour,
