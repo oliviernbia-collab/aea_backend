@@ -1,5 +1,9 @@
 const pool = require('../config/db');
-const { BUREAU_ROLES } = require('../config/permissions');
+const { BUREAU_ROLES, ADJOINT_ROLES } = require('../config/permissions');
+
+// Postes factures au tarif "bureau" (montant_bureau) : titulaires ET adjoints paient le meme
+// tarif, distinct du tarif "membre simple" (montant_membre) applique a tous les autres membres.
+const ROLES_TARIF_BUREAU = [...BUREAU_ROLES, ...ADJOINT_ROLES];
 
 // 0 = droit d'adhesion (paiement unique a l'entree dans l'association) ; 1-12 = cotisation mensuelle
 const MOIS_ADHESION = 0;
@@ -29,7 +33,7 @@ async function montantDuPour(membreId, annee, mois) {
     annee,
   ]);
   if (!config.length) return 0;
-  const estBureau = membre && BUREAU_ROLES.includes(membre.role);
+  const estBureau = membre && ROLES_TARIF_BUREAU.includes(membre.role);
   return Number(estBureau ? config[0].montant_bureau : config[0].montant_membre);
 }
 
@@ -65,7 +69,7 @@ async function assurerLignesAnnee(membreId, annee) {
 
   const [[membre]] = await pool.query('SELECT role FROM users WHERE id = ?', [membreId]);
   if (!membre) return;
-  const montantMensuel = BUREAU_ROLES.includes(membre.role) ? montant_bureau : montant_membre;
+  const montantMensuel = ROLES_TARIF_BUREAU.includes(membre.role) ? montant_bureau : montant_membre;
 
   for (let mois = 1; mois <= 12; mois += 1) {
     await pool.query(
