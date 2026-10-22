@@ -38,12 +38,6 @@ jobs:
           port: 21
           local-dir: ./
           server-dir: ${{ secrets.DEPLOY_PATH }}/
-          # Resynchronisation complete (plutot que la detection de changements habituelle de
-          # l'action, basee sur un etat stocke cote serveur) : plusieurs deploiements recents ont
-          # ete rapportes "success" sans que certains fichiers modifies soient reellement mis a
-          # jour sur le serveur, ce qui suggere un etat de sync desynchronise. Plus lent, mais
-          # garantit que le serveur reflete exactement ce depot a chaque deploiement.
-          dangerous-clean-slate: true
           exclude: |
             **/.git*
             **/.git/**
