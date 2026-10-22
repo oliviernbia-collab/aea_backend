@@ -174,6 +174,13 @@ router.patch('/:id/role', authenticate, requirePermission('membres.changer_role'
 
   await pool.query('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id]);
   await logAudit({ tableName: 'users', recordId: req.params.id, userId: req.user.id, action: 'modification', nouvelleValeur: { role } });
+
+  // Rafraichit le tarif des mois pas encore payes de l'annee en cours selon le nouveau role
+  // (membre simple vs bureau/adjoint) : sans ca, un changement de role ne se repercute sur les
+  // cotisations qu'au prochain enregistrement du bareme dans Administration.
+  await assurerLignesAnnee(req.params.id, new Date().getFullYear());
+
+  broadcast('cotisations:update');
   broadcast('membres:update');
   res.json({ message: 'Rôle mis à jour.' });
 });
