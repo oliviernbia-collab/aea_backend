@@ -15,6 +15,7 @@ const actualitesRoutes = require('./routes/actualites.routes');
 const notificationsRoutes = require('./routes/notifications.routes');
 const permissionsRoutes = require('./routes/permissions.routes');
 const journalRoutes = require('./routes/journal.routes');
+const documentsRoutes = require('./routes/documents.routes');
 const { monterWebhookJeko } = require('./webhooks/jeko.webhook');
 
 const app = express();
@@ -57,6 +58,15 @@ app.get('/api/paiement-retour', (req, res) => {
   const statut = ['succes', 'erreur'].includes(req.query.statut) ? req.query.statut : 'erreur';
   const reference = typeof req.query.reference === 'string' ? req.query.reference : '';
   const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
+  // Achat d'un CV / d'une carte de visite (reference DOC-...) : retour sur la page de la commande,
+  // avec son jeton d'acces, plutot que sur la fiche de cotisation (reservee aux membres connectes).
+  if (/^DOC-[\w-]+$/.test(reference)) {
+    const token = typeof req.query.token === 'string' ? req.query.token : '';
+    const urlDoc = new URL(`/documents/commande/${encodeURIComponent(reference)}`, frontend);
+    urlDoc.searchParams.set('paiement', statut);
+    if (/^[a-f0-9]{64}$/.test(token)) urlDoc.searchParams.set('token', token);
+    return res.redirect(urlDoc.toString());
+  }
   const url = new URL('/cotisations/ma-fiche', frontend);
   url.searchParams.set('paiement', statut);
   if (reference) url.searchParams.set('reference', reference);
@@ -72,6 +82,7 @@ app.use('/api/actualites', actualitesRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/permissions', permissionsRoutes);
 app.use('/api/journal', journalRoutes);
+app.use('/api/documents', documentsRoutes);
 
 app.use('/api', (req, res) => res.status(404).json({ message: 'Route introuvable.' }));
 

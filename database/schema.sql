@@ -225,6 +225,28 @@ CREATE TABLE paiements_en_ligne (
   FOREIGN KEY (paiement_id) REFERENCES paiements(id)
 ) ENGINE=InnoDB;
 
+-- Vente en ligne de CV / cartes de visite (page d'accueil publique, paiement Jeko)
+CREATE TABLE commandes_documents (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  reference VARCHAR(100) NOT NULL UNIQUE,
+  -- Jeton secret remis uniquement a l'acheteur : sans lui, impossible de relire le contenu
+  -- d'une commande (donnees personnelles du CV) ni de le telecharger.
+  acces_token CHAR(64) NOT NULL,
+  type ENUM('cv','carte_visite') NOT NULL,
+  modele VARCHAR(50) NOT NULL,
+  donnees JSON NOT NULL,
+  montant DECIMAL(10,2) NOT NULL,
+  payment_method ENUM('wave','orange','mtn','moov') NOT NULL,
+  payer_phone VARCHAR(20) NOT NULL,
+  jeko_payment_request_id VARCHAR(100) NULL,
+  redirect_url VARCHAR(500) NULL,
+  statut ENUM('pending','success','error') NOT NULL DEFAULT 'pending',
+  error_reason VARCHAR(255) NULL,
+  paye_le TIMESTAMP NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
 -- ============================================================
 -- 6. Gestion des permissions (droits par role, modifiables par le bureau)
 -- ============================================================

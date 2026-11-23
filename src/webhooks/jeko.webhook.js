@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../config/db');
 const jeko = require('../services/jeko');
 const { finaliserPaiementEnLigne } = require('../services/cotisationsPaiements');
+const { finaliserCommandeDocument } = require('../services/documentsPaiements');
 
 // Monte le webhook Jeko directement sur `app`, AVANT `express.json()` : la signature HMAC porte
 // sur le corps brut (raw body), donc ce chemin doit rester en dehors du parseur JSON global.
@@ -32,6 +33,13 @@ function monterWebhookJeko(app) {
 
       const reference = payload.transactionDetails?.reference;
       if (!reference) return;
+
+      // Achat d'un CV / d'une carte de visite depuis la page d'accueil publique.
+      if (reference.startsWith('DOC-')) {
+        const [docs] = await pool.query('SELECT id FROM commandes_documents WHERE reference = ?', [reference]);
+        if (docs.length) await finaliserCommandeDocument(docs[0].id, payload);
+        return;
+      }
 
       const [rows] = await pool.query('SELECT id FROM paiements_en_ligne WHERE reference = ?', [reference]);
       if (!rows.length) return; // paiement non lie a une tentative connue (hors perimetre cotisations)
