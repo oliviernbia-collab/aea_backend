@@ -12,8 +12,8 @@ const router = express.Router();
 const uploadPhoto = makeUploader('documents');
 
 const MODELES = {
-  cv: ['moderne', 'elegant', 'dynamique', 'eclat', 'bandeau'],
-  carte_visite: ['or_noir', 'rouge', 'vague', 'neon', 'emeraude'],
+  cv: ['moderne', 'elegant', 'dynamique', 'eclat', 'bandeau', 'minimal', 'emeraude', 'bordeaux', 'etudiant', 'corail'],
+  carte_visite: ['or_noir', 'rouge', 'vague', 'neon', 'emeraude', 'minimal', 'violet', 'orange_noir', 'turquoise', 'ivoire'],
 };
 const METHODES = ['wave', 'orange', 'mtn', 'moov'];
 const TAILLE_MAX_DONNEES = 60 * 1024; // texte du document (hors photo, stockee sur Cloudinary)
@@ -131,32 +131,44 @@ router.get('/commandes/:reference', async (req, res) => {
   });
 });
 
-// GET /api/documents/ventes -- recettes des ventes de CV / cartes, reservees au super administrateur.
+// GET /api/documents/ventes?du=AAAA-MM-JJ&au=AAAA-MM-JJ -- recettes des ventes de CV / cartes,
+// reservees au super administrateur, filtrables par periode (bornes incluses, facultatives).
 // Volontairement hors de la caisse de l'association (consultable par tous les membres).
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 router.get('/ventes', authenticate, async (req, res) => {
   if (req.user.role !== 'super_admin') return res.status(403).json({ message: 'Action non autorisée.' });
 
+  const du = DATE_RE.test(req.query.du || '') ? req.query.du : null;
+  const au = DATE_RE.test(req.query.au || '') ? req.query.au : null;
+  const conditions = ["statut = 'success'"];
+  const params = [];
+  if (du) { conditions.push('paye_le >= ?'); params.push(`${du} 00:00:00`); }
+  if (au) { conditions.push('paye_le < DATE_ADD(?, INTERVAL 1 DAY)'); params.push(au); }
+  const where = conditions.join(' AND ');
+
   const [parType] = await pool.query(
-    `SELECT type, COUNT(*) AS nombre, COALESCE(SUM(montant), 0) AS total,
-            COALESCE(SUM(CASE WHEN paye_le >= DATE_FORMAT(CURDATE(), '%Y-%m-01') THEN montant END), 0) AS total_mois
-     FROM commandes_documents WHERE statut = 'success' GROUP BY type`
+    `SELECT type, COUNT(*) AS nombre, COALESCE(SUM(montant), 0) AS total
+     FROM commandes_documents WHERE ${where} GROUP BY type`,
+    params
   );
-  const [dernieres] = await pool.query(
+  const [ventes] = await pool.query(
     `SELECT reference, type, modele, montant, payment_method, payer_phone, paye_le,
             JSON_UNQUOTE(JSON_EXTRACT(donnees, '$.prenom')) AS prenom,
             JSON_UNQUOTE(JSON_EXTRACT(donnees, '$.nom')) AS nom
-     FROM commandes_documents WHERE statut = 'success' ORDER BY paye_le DESC LIMIT 100`
+     FROM commandes_documents WHERE ${where} ORDER BY paye_le DESC LIMIT 500`,
+    params
   );
 
-  const resume = { cv: { nombre: 0, total: 0, total_mois: 0 }, carte_visite: { nombre: 0, total: 0, total_mois: 0 } };
-  for (const l of parType) {
-    resume[l.type] = { nombre: Number(l.nombre), total: Number(l.total), total_mois: Number(l.total_mois) };
-  }
+  const resume = { cv: { nombre: 0, total: 0 }, carte_visite: { nombre: 0, total: 0 } };
+  for (const l of parType) resume[l.type] = { nombre: Number(l.nombre), total: Number(l.total) };
   res.json({
+    du,
+    au,
     resume,
+    nombre: resume.cv.nombre + resume.carte_visite.nombre,
     total: resume.cv.total + resume.carte_visite.total,
-    total_mois: resume.cv.total_mois + resume.carte_visite.total_mois,
-    ventes: dernieres,
+    ventes,
   });
 });
 
